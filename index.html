@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="description" content="FitLog — an offline-first training, nutrition and sleep tracker with week-over-week efficiency and recovery comparison.">
+<meta name="theme-color" content="#0b0d12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FitLog">
+<title>FitLog — Training, Diet &amp; Sleep Tracker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">F</span>
+      <span>FitLog</span>
+    </div>
+    <div class="grow"></div>
+    <button class="btn ghost icon" id="btn-reports" title="Reports &amp; export"></button>
+    <button class="btn ghost icon" id="btn-settings" title="Settings"></button>
+  </div>
+</header>
+
+<main class="app" id="view"></main>
+
+<nav class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab-btn" data-tab="overview"><span class="ic"></span><span>Overview</span><i class="tdot"></i></button>
+    <button class="tab-btn" data-tab="fitness"><span class="ic"></span><span>Fitness</span><i class="tdot"></i></button>
+    <button class="tab-btn" data-tab="diet"><span class="ic"></span><span>Diet</span><i class="tdot"></i></button>
+    <button class="tab-btn" data-tab="sleep"><span class="ic"></span><span>Sleep</span><i class="tdot"></i></button>
+  </div>
+</nav>
+
+<div id="toasts"></div>
+
+<!-- Export libraries, bundled locally so the app works fully offline and makes
+     no third-party requests. The app still degrades to CSV / print if absent. -->
+<script src="js/vendor/jspdf.umd.min.js" defer></script>
+<script src="js/vendor/jspdf.plugin.autotable.min.js" defer></script>
+<script src="js/vendor/xlsx.full.min.js" defer></script>
+
+<script src="js/data-exercises.js"></script>
+<script src="js/data-foods.js"></script>
+<script src="js/store.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/tab-fitness.js"></script>
+<script src="js/tab-diet.js"></script>
+<script src="js/tab-sleep.js"></script>
+<script src="js/tab-overview.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/exports.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
