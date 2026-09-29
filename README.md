@@ -1,10 +1,12 @@
 # FitLog
 
 A four-tab fitness log — **Overview, Fitness, Diet, Sleep** — that runs entirely in the browser.
-No account, no server, no tracking. Host it on GitHub Pages and open it from any device.
+No account, no tracking. Host it on GitHub Pages and open it from any device.
 
-Your data lives in that browser's `localStorage`. To move it between devices, export a backup
-file and restore it on the other one.
+Your data lives in the browser's `localStorage`, so the app works offline and owes nothing to
+anyone. Optionally, turn on sync and your phone and laptop stay in step through a Cloudflare
+Worker you deploy once — still no account, nothing that expires, and a pairing code instead of a
+password. See [Sync across devices](#sync-across-devices).
 
 ---
 
@@ -38,7 +40,7 @@ The `.nojekyll` file is already included so GitHub serves every file as-is.
 Open the Pages URL in Safari or Chrome and use **Add to Home Screen** / **Install app**.
 A service worker caches the whole app, so it opens and works with no connection.
 
-After you push an update, bump `CACHE = 'fitlog-v1'` in `sw.js` to `fitlog-v2` (and so on) so
+After you push an update, bump `CACHE = 'fitlog-v2'` in `sw.js` to `fitlog-v3` (and so on) so
 installed copies pick the new version up.
 
 ---
@@ -112,6 +114,66 @@ Plus a 14-night chart and a "what this means" read of the numbers.
 
 ---
 
+## Sync across devices
+
+Optional. Skip it and FitLog is a perfectly good local-only log.
+
+### One-time setup
+
+1. Deploy the worker — see [`worker/README-worker.md`](worker/README-worker.md). About fifteen
+   minutes in the Cloudflare dashboard, free tier, no card.
+2. Put its URL in `js/config.js`:
+
+   ```js
+   window.FITLOG_CONFIG = {
+     syncEndpoint: 'https://fitlog-sync.your-name.workers.dev'
+   };
+   ```
+3. Push. Every device now picks the endpoint up from the site itself — you never type it again.
+
+### Pairing devices
+
+On the device that already holds your history, open **Settings → Sync across devices → Turn on
+sync here**. It generates a 32-character pairing code and uploads your log.
+
+On every other device: open the camera, point it at the QR code shown in settings, and tap the
+link. FitLog opens already paired and pulls your history down. No sign-in, no password, no email.
+
+If a camera isn't practical, **Copy pairing link** or **Show code** and type it in under
+**Pair with another device**.
+
+### How it behaves
+
+- Syncs when you open the app, when you return to the tab, about every 90 seconds while it's
+  open, and a couple of seconds after you stop editing.
+- Offline, everything keeps working and catches up when you reconnect.
+- The status icon in the top bar shows where things stand; tap it to jump to the sync settings.
+
+### How conflicts are resolved
+
+Merging happens **per day, not per file**. Log Monday on your laptop and Tuesday on your phone and
+both survive — they're different keys. Deletions carry a tombstone so removing a day on one device
+removes it everywhere instead of being resurrected on the next sync. Custom foods, recipes and
+sleep fields merge by id.
+
+The only genuine conflict is editing *the same date* on two devices while one is offline, and
+there the later edit wins. Every sync is pull → merge → push, so an offline edit is never
+overwritten; it merges in on the next round.
+
+### Security, honestly
+
+The pairing code **is** the credential — anyone holding it can read and write your log. That's the
+trade that buys you no accounts and nothing that expires. It's 128 bits of randomness, so it isn't
+guessable, but keep it out of group chats and public screenshots. If you ever want to revoke it,
+**Delete cloud copy** erases the record and unpairs; start again with a fresh code.
+
+Cloudflare sees an opaque key and a blob. There's no user list, no email address, no account.
+
+### Limits
+
+A year of daily logging is roughly 250 KB, so the free tier isn't in sight: 100,000 reads and
+1,000 writes a day, and FitLog only writes when something actually changed.
+
 ## Backup, restore and export
 
 Everything is under the **document icon** (reports) and **gear icon** (settings) in the top bar.
@@ -167,20 +229,29 @@ These are estimates to guide training decisions, not medical advice.
 ```
 index.html                  app shell
 css/styles.css              design system, dark and light
+js/config.js                your sync endpoint — the only file you edit
 js/data-exercises.js        ~170 exercises with muscle groups, equipment and MET values
 js/data-foods.js            ~250 foods with per-100 g macros and serving sizes
-js/store.js                 state, persistence, unit conversion, all calculations
+js/store.js                 state, persistence, unit conversion, calculations, merge engine
 js/ui.js                    icons, toasts, sheets, SVG charts
+js/sync.js                  pairing, pull/merge/push, status
 js/tab-overview.js          period comparison engine
 js/tab-fitness.js           training log
 js/tab-diet.js              nutrition, water, recipe calculator
 js/tab-sleep.js             sleep log and derived metrics
-js/settings.js              profile, targets, backup and restore
+js/settings.js              profile, targets, sync, backup and restore
 js/exports.js               PDF, Excel and CSV reports
-js/vendor/                  jsPDF, jsPDF-AutoTable, SheetJS (MIT / Apache-2.0)
+js/vendor/                  jsPDF, jsPDF-AutoTable, SheetJS, qrcode-generator
 sw.js                       offline cache
 manifest.webmanifest        installable app metadata
+
+worker/worker.js            the Cloudflare Worker — deploy this for sync
+worker/README-worker.md     step-by-step deployment
+worker/wrangler.toml        only needed for the CLI route
 ```
+
+Everything under `worker/` is for Cloudflare, not for the website. Uploading it to GitHub is
+harmless — it just sits there — but it is never served to the browser.
 
 No build step, no npm install, no framework. Edit a file, push, done.
 

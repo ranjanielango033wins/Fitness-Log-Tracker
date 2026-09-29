@@ -1,11 +1,14 @@
 /* FitLog service worker — caches the app shell so it opens offline.
    Bump CACHE when you change any file so browsers pick the new version up. */
 
-const CACHE = 'fitlog-v1';
+const CACHE = 'fitlog-v2';
 const SHELL = [
   './',
   './index.html',
   './css/styles.css',
+  './js/config.js',
+  './js/sync.js',
+  './js/vendor/qrcode.js',
   './js/data-exercises.js',
   './js/data-foods.js',
   './js/store.js',
@@ -43,6 +46,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
+
+  // Sync traffic must never be served from cache.
+  if (/\/v1\/log\//.test(req.url)) return;
 
   // App shell: cache first, refresh in the background.
   if (new URL(req.url).origin === location.origin) {

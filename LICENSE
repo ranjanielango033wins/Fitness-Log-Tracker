@@ -26,3 +26,4 @@ Bundled third-party libraries in js/vendor/ retain their own licenses:
   jsPDF               MIT        LICENSE-jspdf.txt
   jsPDF-AutoTable     MIT        LICENSE-jspdf-autotable.txt
   SheetJS (xlsx)      Apache-2.0 LICENSE-xlsx.txt
+  qrcode-generator    MIT        (Kazuhiko Arase)
