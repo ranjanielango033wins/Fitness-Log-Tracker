@@ -85,9 +85,25 @@ function defaultState() {
     customFoods: [],
     recipes: [],
     customSleepFields: [],
+    /* tombstones so a deletion on one device propagates instead of being
+       resurrected by the other device's copy */
+    _del: { days: {}, customFoods: {}, recipes: {}, customSleepFields: {} },
+    /* device-local, never uploaded */
+    sync: {
+      code: null,          // 32 hex chars — the pairing secret
+      endpoint: '',        // overrides config.js if set by hand
+      rev: 0,              // last revision this device saw on the server
+      lastSync: null,
+      lastError: null,
+      deviceId: null
+    },
     meta: { created: new Date().toISOString(), lastBackup: null }
   };
 }
+
+/* Parts of the state that travel between devices. `sync` is deliberately
+   absent — each device keeps its own code, rev and status. */
+const SYNCED_LISTS = ['customFoods', 'recipes', 'customSleepFields'];
 
 /* ---------- store ---------- */
 const Store = {
@@ -104,6 +120,8 @@ const Store = {
     } catch (e) {
       console.warn('FitLog: could not read saved data, starting fresh.', e);
     }
+    if (!this.s.sync.deviceId) this.s.sync.deviceId = uid() + uid();
+    this.seedShadow();
     return this.s;
   },
 
@@ -118,6 +136,9 @@ const Store = {
     merged.recipes = obj.recipes || [];
     merged.customSleepFields = obj.customSleepFields || [];
     merged.meta = Object.assign({}, base.meta, obj.meta || {});
+    merged.sync = Object.assign({}, base.sync, obj.sync || {});
+    merged._del = Object.assign({}, base._del, obj._del || {});
+    ['days'].concat(SYNCED_LISTS).forEach(k => { if (!merged._del[k]) merged._del[k] = {}; });
     merged.v = SCHEMA_VERSION;
     // ensure every day has the full shape
     Object.keys(merged.days).forEach(k => {
@@ -129,7 +150,90 @@ const Store = {
     return merged;
   },
 
-  save() {
+  /* ------------------------------------------------------------------
+     Change stamping.
+
+     Sync needs to know WHICH day or item changed and when, so a merge can
+     resolve per day instead of "newest whole file wins" — which would let a
+     phone erase a laptop's morning. Rather than hand-stamping at every
+     mutation site (and inevitably missing one), we keep a shadow copy of each
+     part's serialised form and diff against it on save. Nothing that mutates
+     state can escape it.
+     ------------------------------------------------------------------ */
+
+  _shadow: null,
+
+  _partStr(obj) {
+    if (!obj) return '';
+    const copy = Object.assign({}, obj);
+    delete copy._m;
+    return JSON.stringify(copy);
+  },
+
+  /** Build the shadow from state as loaded, WITHOUT marking anything changed. */
+  seedShadow() {
+    const sh = { days: {}, lists: {}, profile: '', settings: '' };
+    Object.entries(this.s.days).forEach(([k, d]) => {
+      sh.days[k] = this._partStr(d);
+      if (!d._m) d._m = 1;                 // pre-sync data: oldest possible, but present
+    });
+    SYNCED_LISTS.forEach(name => {
+      sh.lists[name] = {};
+      (this.s[name] || []).forEach(it => {
+        sh.lists[name][it.id] = this._partStr(it);
+        if (!it._m) it._m = 1;
+      });
+    });
+    sh.profile = this._partStr(this.s.profile);
+    sh.settings = this._partStr(this.s.settings);
+    if (!this.s.profile._m) this.s.profile._m = 1;
+    if (!this.s.settings._m) this.s.settings._m = 1;
+    this._shadow = sh;
+  },
+
+  /** Stamp whatever differs from the shadow, and tombstone whatever vanished. */
+  stampChanges() {
+    if (!this._shadow) { this.seedShadow(); return false; }
+    const now = Date.now();
+    const sh = this._shadow;
+    let dirty = false;
+
+    // days
+    const seenDays = {};
+    Object.entries(this.s.days).forEach(([k, d]) => {
+      seenDays[k] = true;
+      const str = this._partStr(d);
+      if (sh.days[k] !== str) { d._m = now; sh.days[k] = str; dirty = true; delete this.s._del.days[k]; }
+    });
+    Object.keys(sh.days).forEach(k => {
+      if (!seenDays[k]) { delete sh.days[k]; this.s._del.days[k] = now; dirty = true; }
+    });
+
+    // id-keyed lists
+    SYNCED_LISTS.forEach(name => {
+      const shelf = sh.lists[name] || (sh.lists[name] = {});
+      const seen = {};
+      (this.s[name] || []).forEach(it => {
+        seen[it.id] = true;
+        const str = this._partStr(it);
+        if (shelf[it.id] !== str) { it._m = now; shelf[it.id] = str; dirty = true; delete this.s._del[name][it.id]; }
+      });
+      Object.keys(shelf).forEach(id => {
+        if (!seen[id]) { delete shelf[id]; this.s._del[name][id] = now; dirty = true; }
+      });
+    });
+
+    // whole-object parts
+    const pStr = this._partStr(this.s.profile);
+    if (sh.profile !== pStr) { this.s.profile._m = now; sh.profile = pStr; dirty = true; }
+    const sStr = this._partStr(this.s.settings);
+    if (sh.settings !== sStr) { this.s.settings._m = now; sh.settings = sStr; dirty = true; }
+
+    return dirty;
+  },
+
+  save(opts) {
+    const dirty = this.stampChanges();
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.s));
     } catch (e) {
@@ -137,6 +241,8 @@ const Store = {
       if (typeof toast === 'function') toast('Storage full — export a backup and clear old data', 'warn');
     }
     this.listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
+    // Local data is already safe; pushing to the cloud is best-effort and debounced.
+    if (dirty && !(opts && opts.fromSync) && typeof Sync !== 'undefined') Sync.schedulePush();
   },
 
   onChange(fn) { this.listeners.push(fn); },
@@ -156,14 +262,31 @@ const Store = {
     return Object.keys(this.s.days).filter(k => dayHasData(this.s.days[k])).sort();
   },
 
-  replaceAll(newState) {
+  /** Restore from a backup or a merge. `restamp` makes the incoming copy win
+      over anything already in the cloud; otherwise its own timestamps decide. */
+  replaceAll(newState, opts) {
+    const keepSync = this.s.sync;
     this.s = this.migrate(newState);
-    this.save();
+    this.s.sync = Object.assign({}, keepSync, { lastError: null });   // pairing is per-device
+    if (opts && opts.restamp) {
+      const now = Date.now();
+      Object.values(this.s.days).forEach(d => d._m = now);
+      SYNCED_LISTS.forEach(n => (this.s[n] || []).forEach(it => it._m = now));
+      this.s.profile._m = now; this.s.settings._m = now;
+    }
+    this._shadow = null;
+    this.seedShadow();
+    this.save(opts);
   },
 
+  /** Wipe this device. Deliberately unpairs rather than pushing a mass delete —
+      erasing the cloud copy is a separate, explicit action. */
   reset() {
     this.s = defaultState();
-    this.save();
+    this.s.sync.deviceId = uid() + uid();
+    this._shadow = null;
+    this.seedShadow();
+    this.save({ fromSync: true });
   },
 
   allFoods() {
@@ -607,6 +730,131 @@ const Calc = {
       });
     });
     return prs;
+  }
+};
+
+/* ==========================================================================
+   Merge — reconciles this device's copy with the cloud copy.
+
+   Resolution is per day and per item, not per file. Log Monday on a laptop and
+   Tuesday on a phone and both survive, because they are different keys. The
+   only real conflict is editing the SAME date on two devices while one is
+   offline, and there the later edit wins.
+   ========================================================================== */
+const TOMBSTONE_TTL = 120 * DAY_MS;
+
+const Merge = {
+  /** Fallback when two copies claim the same instant (or both predate sync). */
+  weight(o) { try { return JSON.stringify(o).length; } catch (e) { return 0; } },
+
+  pick(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const am = a._m || 0, bm = b._m || 0;
+    if (am !== bm) return am > bm ? a : b;
+    return this.weight(a) >= this.weight(b) ? a : b;
+  },
+
+  /** Everything that travels between devices, stripped of device-local state. */
+  payload(s) {
+    const out = { v: s.v, days: s.days, profile: s.profile, settings: s.settings, _del: s._del, meta: s.meta };
+    SYNCED_LISTS.forEach(n => out[n] = s[n]);
+    return JSON.parse(JSON.stringify(out));
+  },
+
+  merge(local, remote) {
+    if (!remote) return this.payload(local);
+    const now = Date.now();
+    const out = {
+      v: SCHEMA_VERSION,
+      days: {},
+      profile: this.pick(local.profile, remote.profile),
+      settings: this.pick(local.settings, remote.settings),
+      _del: {},
+      meta: Object.assign({}, remote.meta, local.meta)
+    };
+    if (local.meta && remote.meta && remote.meta.created && local.meta.created) {
+      out.meta.created = local.meta.created < remote.meta.created ? local.meta.created : remote.meta.created;
+    }
+
+    // tombstones: union, latest wins, expired ones dropped
+    ['days'].concat(SYNCED_LISTS).forEach(part => {
+      const t = {};
+      const add = src => Object.entries(((src || {})._del || {})[part] || {})
+        .forEach(([k, ts]) => { if ((!t[k] || ts > t[k]) && now - ts < TOMBSTONE_TTL) t[k] = ts; });
+      add(local); add(remote);
+      out._del[part] = t;
+    });
+
+    const buried = (part, key, winner) => {
+      const ts = out._del[part][key];
+      return ts != null && ts > (winner._m || 0);
+    };
+
+    // days — sorted so both devices build an identically ordered result
+    const dayKeys = Array.from(new Set(Object.keys(local.days || {}).concat(Object.keys(remote.days || {})))).sort();
+    dayKeys.forEach(k => {
+      const winner = this.pick((local.days || {})[k], (remote.days || {})[k]);
+      if (!winner || buried('days', k, winner)) return;
+      out.days[k] = winner;
+    });
+
+    // id-keyed lists — likewise sorted, since array order is significant
+    SYNCED_LISTS.forEach(name => {
+      const byId = {};
+      (local[name] || []).forEach(it => { if (it && it.id) byId[it.id] = it; });
+      (remote[name] || []).forEach(it => { if (it && it.id) byId[it.id] = this.pick(byId[it.id], it); });
+      out[name] = Object.keys(byId).sort()
+        .map(id => byId[id])
+        .filter(it => !buried(name, it.id, it));
+    });
+
+    return out;
+  },
+
+  /** Write a merged payload into the live store without re-stamping it. */
+  apply(merged) {
+    const s = Store.s;
+    s.days = merged.days || {};
+    s.profile = merged.profile || s.profile;
+    s.settings = merged.settings || s.settings;
+    s._del = merged._del || s._del;
+    s.meta = merged.meta || s.meta;
+    SYNCED_LISTS.forEach(n => s[n] = merged[n] || []);
+    // days arriving from another device may predate a schema change
+    Object.keys(s.days).forEach(k => {
+      const m = s.days[k]._m;
+      s.days[k] = Object.assign(blankDay(), s.days[k]);
+      s.days[k].workout = Object.assign(blankDay().workout, s.days[k].workout || {});
+      s.days[k].diet = Object.assign(blankDay().diet, s.days[k].diet || {});
+      s.days[k].diet.meals = Object.assign(blankDay().diet.meals, s.days[k].diet.meals || {});
+      s.days[k]._m = m;
+    });
+    Store._shadow = null;
+    Store.seedShadow();
+  },
+
+  /** Order-independent serialisation.
+
+      Two devices can hold the same log with object keys in a different order —
+      whichever side merged first puts its own keys first. Comparing raw
+      JSON.stringify output would call that a difference, and the two devices
+      would overwrite each other on every poll forever. Sorting keys makes the
+      comparison mean what it should: same data, regardless of order. */
+  canon(value) {
+    const walk = v => {
+      if (v === null || typeof v !== 'object') return v;
+      if (Array.isArray(v)) return v.map(walk);
+      const out = {};
+      Object.keys(v).sort().forEach(k => { out[k] = walk(v[k]); });
+      return out;
+    };
+    try { return JSON.stringify(walk(value)); } catch (e) { return ''; }
+  },
+
+  /** True when the two payloads would produce identical logs. */
+  same(a, b) {
+    return this.canon(a) === this.canon(b);
   }
 };
 

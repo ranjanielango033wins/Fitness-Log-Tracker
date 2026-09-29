@@ -4,9 +4,13 @@
 
 const Settings = {
 
-  open() {
+  open(focus) {
     const s = openSheet({ title: 'Settings', wide: true, body: '<div id="st"></div>' });
     this.draw(s);
+    if (focus) {
+      const anchor = $('#sec-' + focus, s.sheet);
+      if (anchor) setTimeout(() => anchor.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+    }
   },
 
   draw(s) {
@@ -94,9 +98,12 @@ const Settings = {
       <label class="fld"><span>Default rest between sets (seconds)</span>
         <input type="number" step="15" id="s-rest" value="${st.restTimerSec}"></label>
 
+      <div class="section-title" id="sec-sync">Sync across devices</div>
+      ${this.syncHtml()}
+
       <div class="section-title">Backup &amp; restore</div>
-      <p class="muted small">Your data lives in this browser only. Export a backup file to move it to another device, another
-        browser, or to keep a copy safe. Restoring replaces everything currently in the app.</p>
+      <p class="muted small">A backup file is the belt-and-braces copy — useful whether or not sync is on, and the only way to
+        keep a snapshot of a particular moment. Restoring replaces what is in the app right now.</p>
       <div class="btn-row" style="margin-bottom:10px">
         <button class="btn primary grow" id="b-export">${icon('download')} Download backup</button>
         <button class="btn grow" id="b-import">${icon('upload')} Restore from file</button>
@@ -107,6 +114,7 @@ const Settings = {
       <div class="kv"><span class="kk">Last backup</span>
         <span class="vv">${Store.s.meta.lastBackup ? esc(new Date(Store.s.meta.lastBackup).toLocaleString()) : 'never'}</span></div>
       <div class="kv"><span class="kk">Storage used</span><span class="vv">${this.storageSize()}</span></div>
+      <div class="kv"><span class="kk">Sync</span><span class="vv">${Sync.paired ? 'on' : 'off'}</span></div>
 
       <div class="section-title">Danger zone</div>
       <div class="btn-row">
@@ -123,6 +131,161 @@ const Settings = {
     this.bind(s);
   },
 
+  /* ---------- sync section ---------- */
+  syncHtml() {
+    const sy = Store.s.sync;
+
+    if (!Sync.configured) {
+      return `
+        <p class="muted small">Log on your phone at the gym, see it on your laptop at home. FitLog syncs through a
+          Cloudflare Worker you deploy once — no account, nothing that expires, and the data stays yours.</p>
+        <div class="card" style="background:var(--card-2)">
+          <div class="sync-step"><span class="n">1</span><span class="b">
+            <b>Deploy the worker</b><span class="muted">Follow <span class="mono">worker/README-worker.md</span> in the project — about 15 minutes, free tier.</span></span></div>
+          <div class="sync-step"><span class="n">2</span><span class="b">
+            <b>Put the URL in <span class="mono">js/config.js</span></b><span class="muted">Then push. Every device picks it up from the site itself.</span></span></div>
+          <div class="sync-step"><span class="n">3</span><span class="b">
+            <b>Pair your devices</b><span class="muted">One QR scan each. No passwords, no sign-in.</span></span></div>
+        </div>
+        <label class="fld"><span>Or paste the worker URL just for this device</span>
+          <input id="sy-ep" placeholder="https://fitlog-sync.your-name.workers.dev" value="${esc(sy.endpoint || '')}"></label>`;
+    }
+
+    if (!Sync.paired) {
+      return `
+        <p class="muted small">This device is not syncing yet. Start a new synced log, or join the one your other device already has.</p>
+        <div class="btn-row" style="margin-bottom:12px">
+          <button class="btn primary grow" id="sy-new">${icon('cloud')} Turn on sync here</button>
+          <button class="btn grow" id="sy-join">${icon('qr')} Pair with another device</button>
+        </div>
+        <p class="dim tiny">Pick <b>Turn on sync here</b> on the device that already has your history — it becomes the
+          first copy. On every other device, choose <b>Pair</b>.</p>
+        <label class="fld" style="margin-top:12px"><span>Sync endpoint</span>
+          <input id="sy-ep" value="${esc(sy.endpoint || '')}" placeholder="${esc((window.FITLOG_CONFIG || {}).syncEndpoint || '')}"></label>`;
+    }
+
+    const dot = { ok: 'var(--good)', syncing: 'var(--acc)', offline: 'var(--warn)', error: 'var(--bad)' }[Sync.state] || 'var(--tx-3)';
+    return `
+      <div class="card" style="background:var(--card-2);margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+          <span style="width:9px;height:9px;border-radius:50%;background:${dot};flex:none"></span>
+          <b>${Sync.state === 'ok' ? 'Syncing' : Sync.state === 'syncing' ? 'Syncing now' : Sync.state === 'offline' ? 'Offline' : Sync.state === 'error' ? 'Sync problem' : 'Connected'}</b>
+          <div class="grow"></div>
+          <button class="btn xs" id="sy-now">${icon('refresh')} Sync now</button>
+        </div>
+        <div class="small muted">${esc(Sync.statusLine())}</div>
+      </div>
+
+      <div class="section-title" style="margin-top:6px">Add another device</div>
+      <p class="muted small">Open the camera on the other device and point it at this code. It opens FitLog already paired —
+        nothing to type.</p>
+      <div class="qr-wrap" id="sy-qr">${Sync.qrSvg(Sync.pairLink(), 210) || '<div class="dim small">QR unavailable</div>'}</div>
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn grow" id="sy-copy">${icon('link')} Copy pairing link</button>
+        <button class="btn grow" id="sy-reveal">${icon('eye')} Show code</button>
+      </div>
+      <div class="code-box masked" id="sy-code">${esc(Sync.pretty(sy.code))}</div>
+      <p class="dim tiny" style="margin-top:8px">Anyone holding this code can read and write your log, so keep it off
+        group chats and public screenshots. It never expires — write it down somewhere safe.</p>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn grow" id="sy-unpair">Stop syncing this device</button>
+        <button class="btn danger grow" id="sy-wipe">Delete cloud copy</button>
+      </div>
+      <label class="fld" style="margin-top:12px"><span>Sync endpoint</span>
+        <input id="sy-ep" value="${esc(sy.endpoint || '')}" placeholder="${esc((window.FITLOG_CONFIG || {}).syncEndpoint || '')}"></label>`;
+  },
+
+  bindSync(s) {
+    const root = s.sheet;
+    const redraw = () => this.draw(s);
+
+    const ep = $('#sy-ep', root);
+    if (ep) ep.addEventListener('change', () => {
+      Store.s.sync.endpoint = ep.value.trim().replace(/\/+$/, '');
+      Store.save({ fromSync: true });
+      Sync.paintBadge();
+      redraw();
+    });
+
+    const el = id => $('#' + id, root);
+
+    if (el('sy-new')) el('sy-new').onclick = async () => {
+      const ok = await confirmSheet('Turn on sync',
+        'This device becomes the first copy in the cloud. Pair your other devices to it afterwards and they will pull this history down.',
+        'Turn on sync');
+      if (!ok) return;
+      await Sync.connectNew();
+      redraw();
+    };
+
+    if (el('sy-join')) el('sy-join').onclick = () => this.joinSheet(() => redraw());
+
+    if (el('sy-now')) el('sy-now').onclick = async () => {
+      await Sync.sync({ reason: 'manual' });
+      redraw();
+      if (Sync.state === 'ok') toast('Up to date', 'good');
+    };
+
+    if (el('sy-copy')) el('sy-copy').onclick = async () => {
+      const link = Sync.pairLink();
+      try {
+        await navigator.clipboard.writeText(link);
+        toast('Pairing link copied', 'good');
+      } catch (e) {
+        const box = el('sy-code');
+        box.classList.remove('masked');
+        box.textContent = link;
+        toast('Copy it by hand — clipboard blocked', 'warn');
+      }
+    };
+
+    if (el('sy-reveal')) el('sy-reveal').onclick = () => el('sy-code').classList.toggle('masked');
+    if (el('sy-code')) el('sy-code').onclick = () => el('sy-code').classList.remove('masked');
+
+    if (el('sy-unpair')) el('sy-unpair').onclick = async () => {
+      const ok = await confirmSheet('Stop syncing this device',
+        'This device keeps everything it has and stops talking to the cloud. Your other devices carry on, and the cloud copy is untouched. You can pair again later with the same code.',
+        'Stop syncing');
+      if (!ok) return;
+      Sync.unpair();
+      redraw();
+      toast('Sync off on this device', 'warn');
+    };
+
+    if (el('sy-wipe')) el('sy-wipe').onclick = async () => {
+      const ok = await confirmSheet('Delete cloud copy',
+        'Erases the synced copy from your worker and unpairs this device. Data already on your devices stays where it is, but they will stop seeing each other. This cannot be undone.',
+        'Delete cloud copy', true);
+      if (!ok) return;
+      const done = await Sync.deleteCloud();
+      redraw();
+      if (done) toast('Cloud copy deleted', 'warn');
+    };
+  },
+
+  joinSheet(after) {
+    const s = openSheet({
+      title: 'Pair with another device',
+      body: `
+        <p class="muted small">On the device that already has your log, open <b>Settings → Sync</b> and show its QR code.
+          Scan it with this device's camera and you are done — you only need what is below if the camera is not an option.</p>
+        <label class="fld"><span>Pairing code or link</span>
+          <input id="jn" placeholder="A1B2 C3D4 … or the pasted link" autocomplete="off" spellcheck="false"></label>
+        <p class="dim tiny">Spaces and capitals do not matter.</p>`,
+      foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="jn-go">Pair</button>`
+    });
+    const go = async () => {
+      const val = $('#jn', s.sheet).value;
+      if (!Sync.parseCode(val)) return toast('That code is not complete', 'warn');
+      s.close();
+      await Sync.adoptCode(val);
+      if (after) after();
+    };
+    $('#jn-go', s.sheet).onclick = go;
+    $('#jn', s.sheet).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  },
+
   storageSize() {
     try {
       const b = new Blob([localStorage.getItem(STORAGE_KEY) || '']).size;
@@ -133,6 +296,7 @@ const Settings = {
   bind(s) {
     const root = s.sheet;
     const commit = () => { Store.save(); App.render(); };
+    this.bindSync(s);
 
     const num = (sel, fn) => { const e = $(sel, root); if (e) e.addEventListener('change', () => { fn(e.value); commit(); }); };
 
@@ -237,7 +401,8 @@ const Backup = {
       if (!choice) return;
 
       if (choice === 'replace') {
-        Store.replaceAll(data);
+        // restamp so a deliberate restore also wins over whatever is in the cloud
+        Store.replaceAll(data, { restamp: true });
         toast(`Restored ${incomingDays} days`, 'good');
       } else {
         // merge: incoming days win on conflict, everything else is unioned
@@ -249,7 +414,7 @@ const Backup = {
         (data.recipes || []).forEach(x => { if (!rids.has(x.id)) merged.recipes.push(x); });
         const sids = new Set(merged.customSleepFields.map(x => x.id));
         (data.customSleepFields || []).forEach(x => { if (!sids.has(x.id)) merged.customSleepFields.push(x); });
-        Store.replaceAll(merged);
+        Store.replaceAll(merged, { restamp: true });
         toast(`Merged ${incomingDays} days into your log`, 'good');
       }
       if (done) done();

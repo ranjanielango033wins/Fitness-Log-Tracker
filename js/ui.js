@@ -63,7 +63,13 @@ const ICONS = {
   chevron:   '<path d="M6 9l6 6 6-6"/>',
   refresh:   '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   zap:       '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
-  layers:    '<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>'
+  layers:    '<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>',
+  cloud:     '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  cloudoff:  '<path d="M22.6 16.9A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-1.62-3.1M2 2l20 20M5.8 5.8A8 8 0 0 0 9 20h9a5 5 0 0 0 1.7-.3"/>',
+  link:      '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  qr:        '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3z"/>',
+  phone:     '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/>',
+  eye:       '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
 };
 
 function icon(name, cls) {

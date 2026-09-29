@@ -29,6 +29,7 @@ const App = {
     $('#btn-settings').onclick = () => Settings.open();
     $('#btn-reports').innerHTML = icon('file');
     $('#btn-reports').onclick = () => Reports.open();
+    $('#sync-badge').onclick = () => Settings.open('sync');
 
     window.addEventListener('keydown', e => {
       if (e.target.matches('input, textarea, select')) return;
@@ -54,11 +55,13 @@ const App = {
 
     window.addEventListener('beforeunload', () => Store.save());
 
-    if (!Store.loggedDays().length && !Store.s.profile.name) {
+    const pairingFromLink = !!Sync.parseCode(location.hash);
+    if (!Store.loggedDays().length && !Store.s.profile.name && !pairingFromLink) {
       setTimeout(() => this.welcome(), 350);
     }
 
     this.render();
+    Sync.init();
 
     if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.FITLOG_NO_SW) {
       navigator.serviceWorker.register('sw.js').catch(() => { /* offline cache is optional */ });
