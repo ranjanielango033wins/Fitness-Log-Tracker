@@ -75,16 +75,43 @@ adductors, olympic/power; running, cycling, machines, conditioning, mobility) wi
 
 Logging follows the pattern used by Strong and Hevy — one row per set:
 
-| Set | kg | Reps | RPE | ✓ |
+| Set | kg | Reps | kcal | ✓ |
 |---|---|---|---|---|
 
 - Tap the set number to cycle **working → warm-up → drop set → to failure**. Warm-ups are excluded
-  from volume.
+  from volume but still count toward energy — you did the work.
 - Tap ✓ to mark a set done; blank fields inherit the set above, and the rest timer starts.
+- The **kcal** column is calculated, not typed. See [Energy](#energy) below.
 - Adding an exercise pre-fills the sets from the last time you did it.
-- Cardio entries log duration, distance, average heart rate and intensity, with pace and calories derived.
-- Each card shows volume, estimated 1RM and your standing best; the exercise menu (pencil) has history
-  with an e1RM trend chart, duplicate, and notes.
+- Cardio entries log duration, distance, average heart rate, intensity and **the calorie figure off the
+  machine** — enter it and FitLog uses it instead of its own estimate.
+- Each card shows volume, estimated 1RM, energy and your standing best; the exercise menu (pencil) has
+  history with an e1RM trend chart, duplicate, and notes.
+- When a session has more than one exercise, an **Energy breakdown** card shows where the calories went.
+
+#### Energy
+
+Standard MET tables give "weight lifting" a single number regardless of what you lifted, which makes a
+set of 20 kg curls cost the same as a set of 180 kg squats. FitLog costs a set from the work it
+actually did:
+
+```
+work (J) = load × 9.81 × range of motion × reps × (1 + 0.35)
+kcal     = work ÷ 4184 ÷ 0.22
+```
+
+The 0.35 is the lowering phase, which costs roughly a third of the lifting phase. The 0.22 is muscular
+efficiency — the share of chemical energy that becomes mechanical work. On top of that sits a small
+time term for bracing while the set runs (MET 3.5) and the rest between sets (MET 2.5).
+
+Bodyweight movements use a share of your body weight as the load — a push-up moves about 64% of you, a
+pull-up all of it — plus anything you hung off a belt. Holds and carries do no net mechanical work, so
+they are costed by time instead.
+
+Range of motion comes from a table of typical values per movement. A tall lifter's bench stroke is
+longer than a short one's, so treat the result as a good estimate rather than a measurement — and note
+it doesn't try to capture the afterburn. What it does do is respond correctly to the things that
+actually drive the cost: how heavy, how many, how far.
 
 ### 3. Diet
 - **Energy card** — calories eaten against target, calories burned in training, remaining, and net,
@@ -206,7 +233,8 @@ everything is stored in metric internally, so switching back and forth never cha
 | Goal calories | −20% cut, −10% slow cut, maintain, +8% lean gain, +15% mass gain |
 | Protein target | 1.8–2.2 g per kg depending on goal |
 | Water target | 35 ml/kg + 600 ml per training hour + 500 ml in a hot climate |
-| Training energy burn | `MET × 3.5 × kg / 200` kcal per minute (Compendium of Physical Activities) |
+| Cardio energy burn | The machine's own figure when you enter one; otherwise `MET × 3.5 × kg / 200` kcal per minute (Compendium of Physical Activities) |
+| Resistance energy burn | Per set: `load × 9.81 × range of motion × reps × 1.35 ÷ 4184 ÷ 0.22` kcal, plus a time-under-tension term at MET 3.5 and rest periods at MET 2.5 |
 | Estimated 1RM | Epley `w × (1 + r/30)` by default; Brzycki, Lombardi, O'Conner and Wathan also selectable |
 | Training volume | Σ weight × reps across working sets (warm-ups excluded) |
 | Training load | Session RPE method: duration in minutes × average RPE |

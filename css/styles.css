@@ -368,6 +368,23 @@ label.fld > span { display: block; font-size: 12px; font-weight: 600; color: var
   border-radius: 999px; padding: 3px 9px; font-size: 11.5px; font-weight: 650;
 }
 .pill.pr { background: color-mix(in srgb, var(--warn) 18%, transparent); border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); }
+.pill.kcal-pill { color: var(--warn); display: inline-flex; align-items: center; gap: 4px; }
+.pill.kcal-pill svg { width: 12px; height: 12px; }
+
+/* per-set energy readout */
+.set-kcal {
+  display: block; padding: 7px 2px; font-size: 13px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--warn);
+}
+.set-kcal.dim { color: var(--tx-3); font-weight: 500; }
+
+/* session energy breakdown */
+.energy-list { display: flex; flex-direction: column; gap: 11px; }
+.energy-row .er-top {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; font-size: 13.5px;
+}
+.energy-row .er-name { font-weight: 600; flex: 1; min-width: 0; }
+.energy-row .er-val { white-space: nowrap; font-weight: 700; font-size: 13px; }
 
 /* ---------- modal / sheet ---------- */
 .scrim {

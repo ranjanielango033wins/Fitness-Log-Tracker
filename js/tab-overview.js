@@ -140,9 +140,11 @@ const Overview = {
       else if (cur.workoutDays < prev.workoutDays) push('warn', 'Fewer sessions',
         `${cur.workoutDays} vs ${prev.workoutDays}. Consistency dropped, which usually shows up in volume before it shows up in strength.`);
     }
-    if (cur.avgRpe && prev.avgRpe && cur.avgRpe - prev.avgRpe > 0.7 && volD.pct < 2) {
-      push('warn', 'Working harder for the same output',
-        `Average RPE rose from ${round(prev.avgRpe, 1)} to ${round(cur.avgRpe, 1)} without more volume. That is the classic fatigue signature — check sleep and calories.`);
+    if (cur.trainKcal && prev.trainKcal && cur.workoutDays && prev.workoutDays) {
+      const perSessionNow = cur.trainKcal / cur.workoutDays, perSessionBefore = prev.trainKcal / prev.workoutDays;
+      const kd = delta(perSessionNow, perSessionBefore);
+      if (kd.pct > 8) push('good', 'Doing more work per session',
+        `${fmtNum(perSessionNow)} kcal of training a session against ${fmtNum(perSessionBefore)} before — more load moved through more range, not just more time in the gym.`);
     }
 
     /* nutrition */
@@ -244,7 +246,7 @@ const Overview = {
           ${row('Reps', cur.reps, prev.reps)}
           ${row('Time training', cur.trainMin, prev.trainMin, { fmt: v => v == null ? '–' : fmtMin(v) })}
           ${row('Training load (sRPE)', cur.load, prev.load)}
-          ${row('Average RPE', cur.avgRpe, prev.avgRpe, { dp: 1, neutral: true })}
+          ${cur.avgRpe || prev.avgRpe ? row('Cardio intensity', cur.avgRpe, prev.avgRpe, { dp: 1, neutral: true }) : ''}
           ${cur.distanceKm || prev.distanceKm ? row('Cardio distance', Units.dOut(cur.distanceKm), Units.dOut(prev.distanceKm), { dp: 2, unit: Units.dLabel() }) : ''}
           ${row('Training calories', cur.trainKcal, prev.trainKcal, { unit: 'kcal' })}
           ${row('Training score', cur.training, prev.training, { dp: 0 })}

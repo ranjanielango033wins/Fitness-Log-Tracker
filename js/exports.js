@@ -87,7 +87,7 @@ const Reports = {
     const prevKeys = rangeKeys(addDays(keys[0], -span), span);
     const prev = Calc.aggregate(prevKeys);
 
-    const sets = [], cardio = [], foods = [], daily = [], sleep = [], water = [];
+    const sets = [], cardio = [], foods = [], daily = [], sleep = [], water = [], energy = [];
 
     keys.forEach(k => {
       const d = Store.s.days[k];
@@ -102,8 +102,12 @@ const Reports = {
             Date: k, Exercise: e.exercise, Group: e.groupName,
             Minutes: e.duration || 0,
             [`Distance (${Units.dLabel()})`]: e.distance ? round(Units.dOut(e.distance), 2) : '',
-            'Avg HR': e.hr || '', RPE: e.rpe || '',
-            Calories: Calc.entryKcal(e, p.weightKg), Load: Calc.entryLoad(e)
+            'Avg HR': e.hr || '', Intensity: e.rpe || '',
+            'Calories (machine)': e.kcalMachine != null && e.kcalMachine !== '' ? +e.kcalMachine : '',
+            'Calories (estimated)': Calc.metKcal(e.met || 7, e.duration || 0, p.weightKg),
+            'Calories used': Calc.entryKcal(e, p.weightKg),
+            Source: Calc.entryKcalMeasured(e) ? 'machine' : 'estimate',
+            Load: Calc.entryLoad(e)
           });
         } else {
           (e.sets || []).forEach((st, i) => {
@@ -115,7 +119,9 @@ const Reports = {
               [`Weight (${Units.wLabel()})`]: st.w != null ? round(Units.wOut(st.w), 2) : '',
               Reps: st.r || (st.sec ? '' : 0),
               'Seconds': st.sec || '',
-              RPE: st.rpe || '',
+              [`Load moved (${Units.wLabel()})`]: round(Units.wOut(Calc.setLoadKg(e, st, p.weightKg)), 1),
+              'ROM (m)': e.mode === 'time' ? '' : exerciseRom(e.exercise, e.group),
+              'Calories': round(Calc.setKcal(e, st, p.weightKg), 2),
               [`Volume (${Units.wLabel()})`]: round(Units.wOut((st.w || 0) * (st.r || 0)), 1),
               [`Est. 1RM (${Units.wLabel()})`]: st.w && st.r ? round(Units.wOut(Calc.e1rm(st.w, st.r)), 1) : ''
             });
@@ -153,6 +159,14 @@ const Reports = {
         sleep.push(row);
       }
 
+      (wsum.byExercise || []).forEach(x => energy.push({
+        Date: k, Exercise: x.name, 'Muscle group': x.group,
+        Section: EX_LIB[x.section] ? EX_LIB[x.section].label : x.section,
+        Calories: round(x.kcal, 1),
+        'Share of session (%)': wsum.kcal ? round(x.kcal / wsum.kcal * 100, 1) : '',
+        Source: x.measured ? 'machine' : 'estimate'
+      }));
+
       if (dayHasData(d)) daily.push({
         Date: k,
         Day: keyToDate(k).toLocaleDateString(undefined, { weekday: 'short' }),
@@ -179,7 +193,7 @@ const Reports = {
       'Heaviest reps': r.heaviestReps || r.r
     }));
 
-    return { keys, prevKeys, cur, prev, p, t, sets, cardio, foods, daily, sleep, water, prs };
+    return { keys, prevKeys, cur, prev, p, t, sets, cardio, foods, daily, sleep, water, prs, energy };
   },
 
   comparisonRows(b) {
@@ -369,7 +383,14 @@ const Reports = {
       pageBreak(150);
       title('Cardio log', 13);
       const cols = Object.keys(b.cardio[0]);
-      table(cols, b.cardio.map(r => cols.map(c => r[c])), { margin: { left: 30, right: 30 }, styles: { fontSize: 7 } });
+      table(cols, b.cardio.map(r => cols.map(c => r[c])), { margin: { left: 30, right: 30 }, styles: { fontSize: 6.6 } });
+    }
+    if (b.energy.length) {
+      pageBreak(150);
+      title('Energy by exercise', 13);
+      para('Resistance work is costed from the physical work each set did — load, range of motion and reps — rather than a flat rate per minute. Cardio uses the machine’s own figure where one was entered.');
+      const cols = Object.keys(b.energy[0]);
+      table(cols, b.energy.map(r => cols.map(c => r[c])), { margin: { left: 30, right: 30 }, styles: { fontSize: 6.8 } });
     }
 
     /* --- sleep detail --- */
@@ -524,6 +545,7 @@ const Reports = {
     add('Daily', b.daily);
     add('Strength sets', b.sets);
     add('Cardio', b.cardio);
+    add('Energy by exercise', b.energy);
     add('Nutrition items', b.foods);
     add('Water', b.water);
     add('Sleep', b.sleep);
@@ -581,6 +603,7 @@ const Reports = {
       '', '## DAILY LOG', toCsv(b.daily),
       '', '## STRENGTH SETS', toCsv(b.sets),
       '', '## CARDIO', toCsv(b.cardio),
+      '', '## ENERGY BY EXERCISE', toCsv(b.energy),
       '', '## NUTRITION ITEMS', toCsv(b.foods),
       '', '## WATER', toCsv(b.water),
       '', '## SLEEP', toCsv(b.sleep),

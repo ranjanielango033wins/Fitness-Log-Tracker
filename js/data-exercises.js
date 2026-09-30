@@ -73,6 +73,8 @@ const EX_LIB = {
           { n: 'Cable Lateral Raise', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Dumbbell Front Raise', eq: 'Dumbbell', mode: 'strength', met: 4.5 },
           { n: 'Rear Delt Fly (Dumbbell)', eq: 'Dumbbell', mode: 'strength', met: 4.5 },
+          { n: 'Rear Delt Fly (Machine)', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Rear Delt Fly (Cable)', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Reverse Pec Deck', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Upright Row', eq: 'Barbell', mode: 'strength', met: 5 },
           { n: 'Landmine Press', eq: 'Barbell', mode: 'strength', met: 5.5 }
@@ -97,6 +99,8 @@ const EX_LIB = {
           { n: 'Preacher Curl', eq: 'Barbell', mode: 'strength', met: 4.5 },
           { n: 'Concentration Curl', eq: 'Dumbbell', mode: 'strength', met: 4 },
           { n: 'Cable Curl', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'Arm Curl Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Preacher Curl Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Spider Curl', eq: 'Dumbbell', mode: 'strength', met: 4 }
         ]
       },
@@ -317,3 +321,117 @@ const EX_BY_NAME = (() => {
   EX_FLAT.forEach(e => { m[e.name] = e; });
   return m;
 })();
+
+/* ==========================================================================
+   Energy-model data
+
+   Estimating the calories a set costs starts from the mechanical work done:
+   load x gravity x distance moved x reps. That needs a range of motion for
+   each movement, in metres, measured on the bar or handle rather than on the
+   joint. These are typical values for an average-height lifter — a tall
+   lifter's bench stroke is longer, a short one's shorter — which is why the
+   result is an estimate rather than a measurement.
+   ========================================================================== */
+
+/* Fallback by muscle group, used when a movement is not listed below. */
+const ROM_BY_GROUP = {
+  chest: 0.45, back: 0.48, shoulders: 0.50, traps: 0.15,
+  biceps: 0.35, triceps: 0.35, forearms: 0.10, core: 0.30,
+  quads: 0.50, hamstrings: 0.42, glutes: 0.35, calves: 0.16,
+  adductors: 0.35, power: 0.70
+};
+
+const ROM_BY_EXERCISE = {
+  /* chest */
+  'Barbell Bench Press': 0.45, 'Incline Barbell Bench Press': 0.42, 'Decline Barbell Bench Press': 0.38,
+  'Dumbbell Bench Press': 0.48, 'Incline Dumbbell Press': 0.45, 'Decline Dumbbell Press': 0.40,
+  'Dumbbell Fly': 0.55, 'Incline Dumbbell Fly': 0.55,
+  'Cable Crossover (High to Low)': 0.60, 'Cable Crossover (Low to High)': 0.60,
+  'Pec Deck / Machine Fly': 0.55, 'Chest Press Machine': 0.45, 'Smith Machine Bench Press': 0.45,
+  'Push-Up': 0.40, 'Incline Push-Up': 0.35, 'Decline Push-Up': 0.42,
+  'Chest Dip': 0.45, 'Svend Press': 0.40,
+
+  /* back */
+  'Deadlift (Conventional)': 0.55, 'Rack Pull': 0.28, 'Sumo Deadlift': 0.50, 'Trap Bar Deadlift': 0.52,
+  'Barbell Bent-Over Row': 0.45, 'Pendlay Row': 0.50, 'T-Bar Row': 0.45,
+  'Dumbbell Row (Single Arm)': 0.50, 'Chest-Supported Dumbbell Row': 0.45,
+  'Seated Cable Row': 0.50, 'Lat Pulldown (Wide Grip)': 0.58, 'Lat Pulldown (Close Grip)': 0.60,
+  'Straight-Arm Pulldown': 0.55, 'Cable Face Pull': 0.45,
+  'Pull-Up': 0.62, 'Chin-Up': 0.62, 'Inverted Row': 0.45, 'Machine Row': 0.48,
+  'Back Extension / Hyperextension': 0.45, 'Good Morning': 0.40,
+
+  /* shoulders */
+  'Overhead Press (Barbell)': 0.55, 'Seated Dumbbell Shoulder Press': 0.55, 'Arnold Press': 0.55,
+  'Push Press': 0.60, 'Machine Shoulder Press': 0.50,
+  'Dumbbell Lateral Raise': 0.55, 'Cable Lateral Raise': 0.55, 'Dumbbell Front Raise': 0.55,
+  'Rear Delt Fly (Dumbbell)': 0.50, 'Rear Delt Fly (Machine)': 0.48, 'Rear Delt Fly (Cable)': 0.55,
+  'Reverse Pec Deck': 0.48, 'Upright Row': 0.40, 'Landmine Press': 0.50,
+
+  /* traps and grip */
+  'Barbell Shrug': 0.15, 'Dumbbell Shrug': 0.16, 'Cable Shrug': 0.15, 'Neck Curl / Extension': 0.12,
+  'Wrist Curl': 0.10, 'Reverse Wrist Curl': 0.08, 'Reverse Curl': 0.35,
+
+  /* arms */
+  'Barbell Curl': 0.36, 'EZ-Bar Curl': 0.35, 'Dumbbell Curl': 0.38, 'Hammer Curl': 0.38,
+  'Incline Dumbbell Curl': 0.42, 'Preacher Curl': 0.32, 'Concentration Curl': 0.34,
+  'Cable Curl': 0.36, 'Arm Curl Machine': 0.34, 'Preacher Curl Machine': 0.32, 'Spider Curl': 0.32,
+  'Close-Grip Bench Press': 0.45, 'Skull Crusher (Lying Extension)': 0.40,
+  'Overhead Dumbbell Extension': 0.45, 'Cable Pushdown (Bar)': 0.35, 'Cable Pushdown (Rope)': 0.38,
+  'Overhead Cable Extension': 0.45, 'Triceps Dip': 0.45, 'Bench Dip': 0.35,
+  'Diamond Push-Up': 0.38, 'Kickback': 0.30,
+
+  /* core */
+  'Hanging Leg Raise': 0.70, 'Captain’s Chair Knee Raise': 0.45, 'Cable Crunch': 0.35,
+  'Crunch': 0.25, 'Bicycle Crunch': 0.30, 'Russian Twist': 0.35, 'Ab Wheel Rollout': 0.70,
+  'Dead Bug': 0.30, 'Pallof Press': 0.40,
+
+  /* quads */
+  'Back Squat': 0.55, 'Front Squat': 0.55, 'Box Squat': 0.45, 'Smith Machine Squat': 0.52,
+  'Hack Squat': 0.50, 'Leg Press': 0.45, 'Goblet Squat': 0.50,
+  'Bulgarian Split Squat': 0.50, 'Walking Lunge': 0.45, 'Reverse Lunge': 0.45,
+  'Step-Up': 0.40, 'Leg Extension': 0.50, 'Sissy Squat': 0.45,
+
+  /* hamstrings and glutes */
+  'Romanian Deadlift': 0.45, 'Stiff-Leg Deadlift': 0.50, 'Dumbbell Romanian Deadlift': 0.45,
+  'Single-Leg RDL': 0.45, 'Lying Leg Curl': 0.40, 'Seated Leg Curl': 0.40,
+  'Nordic Hamstring Curl': 0.60, 'Glute-Ham Raise': 0.55, 'Cable Pull-Through': 0.45,
+  'Barbell Hip Thrust': 0.35, 'Glute Bridge': 0.30, 'Single-Leg Hip Thrust': 0.32,
+  'Cable Kickback': 0.40, 'Hip Abduction Machine': 0.35, 'Curtsy Lunge': 0.45,
+
+  /* calves, hips */
+  'Standing Calf Raise': 0.16, 'Seated Calf Raise': 0.14, 'Leg Press Calf Raise': 0.15,
+  'Dumbbell Calf Raise': 0.16, 'Single-Leg Calf Raise': 0.16, 'Tibialis Raise': 0.12,
+  'Hip Adduction Machine': 0.35, 'Cossack Squat': 0.50, 'Sumo Squat': 0.50,
+
+  /* power */
+  'Power Clean': 0.75, 'Hang Clean': 0.60, 'Clean & Jerk': 1.05, 'Snatch': 0.95,
+  'Kettlebell Swing': 0.60, 'Box Jump': 0.40, 'Broad Jump': 0.35
+};
+
+/* Share of bodyweight actually lifted in a calisthenic movement. A push-up
+   moves roughly two-thirds of you; a pull-up moves all of you. Any weight
+   entered in the set is added on top. */
+const BW_LOAD_FRACTION = {
+  'Push-Up': 0.64, 'Incline Push-Up': 0.55, 'Decline Push-Up': 0.70, 'Diamond Push-Up': 0.64,
+  'Chest Dip': 0.95, 'Triceps Dip': 0.95, 'Bench Dip': 0.45,
+  'Pull-Up': 1.00, 'Chin-Up': 1.00, 'Inverted Row': 0.60,
+  'Back Extension / Hyperextension': 0.45,
+  'Hanging Leg Raise': 0.45, 'Captain’s Chair Knee Raise': 0.35,
+  'Crunch': 0.30, 'Bicycle Crunch': 0.32, 'Russian Twist': 0.30,
+  'Ab Wheel Rollout': 0.55, 'Dead Bug': 0.25,
+  'Sissy Squat': 0.70, 'Nordic Hamstring Curl': 0.60, 'Glute-Ham Raise': 0.55,
+  'Glute Bridge': 0.35, 'Single-Leg Hip Thrust': 0.45,
+  'Single-Leg Calf Raise': 0.90, 'Tibialis Raise': 0.25,
+  'Cossack Squat': 0.70, 'Box Jump': 1.00, 'Broad Jump': 1.00
+};
+
+const BW_LOAD_DEFAULT = 0.65;
+
+function exerciseRom(name, groupId) {
+  return ROM_BY_EXERCISE[name] || ROM_BY_GROUP[groupId] || 0.40;
+}
+
+function bodyweightFraction(name) {
+  const f = BW_LOAD_FRACTION[name];
+  return f == null ? BW_LOAD_DEFAULT : f;
+}

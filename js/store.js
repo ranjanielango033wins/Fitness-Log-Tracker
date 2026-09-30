@@ -450,33 +450,141 @@ const Calc = {
   },
 
   /** kcal/min = MET x 3.5 x kg / 200  (Compendium standard) */
-  metKcal(met, minutes, weightKg) {
+  metKcalRaw(met, minutes, weightKg) {
     if (!met || !minutes) return 0;
-    return Math.round(met * 3.5 * weightKg / 200 * minutes);
+    return met * 3.5 * weightKg / 200 * minutes;
+  },
+
+  metKcal(met, minutes, weightKg) {
+    return Math.round(this.metKcalRaw(met, minutes, weightKg));
+  },
+
+  /* ------------------------------------------------------------------
+     Resistance-training energy
+
+     MET tables treat "weight lifting" as one number regardless of what you
+     actually lifted, which makes a set of 20 kg curls cost the same as a set
+     of 180 kg squats. That is useless for a log. So a set is costed from the
+     physical work it took:
+
+       work (J) = load x 9.81 x range of motion x reps x (1 + eccentric)
+
+     The lowering phase costs roughly a third of the lifting phase, and human
+     muscle converts chemical energy to mechanical work at about 22%
+     efficiency, so the metabolic cost is the work divided by that. On top
+     sits a small time term for bracing and stabilising while the set runs,
+     and the rest between sets is costed separately at a recovery rate.
+
+     It remains an estimate — range of motion varies with limb length, and
+     none of this captures the afterburn — but it responds correctly to the
+     things that actually drive the cost: how heavy, how many, how far.
+     ------------------------------------------------------------------ */
+
+  ENERGY: {
+    g: 9.80665,
+    efficiency: 0.22,     // mechanical work -> metabolic cost
+    eccentric: 0.35,      // lowering phase, as a share of the lifting phase
+    secPerRep: 3,         // time under tension per rep
+    metUnderLoad: 3.5,    // bracing and stabilising while a set runs
+    metRest: 2.5,         // standing recovery between sets
+    metIsometric: 4.0     // planks, holds, carries
+  },
+
+  /** What the set actually moved, in kg — bodyweight movements included. */
+  setLoadKg(entry, set, bodyweightKg) {
+    const added = set.w || 0;
+    if (entry.mode === 'bodyweight') {
+      return bodyweightKg * bodyweightFraction(entry.exercise) + added;
+    }
+    return added;
+  },
+
+  /** Energy cost of one completed set, in kcal. */
+  setKcal(entry, set, bodyweightKg) {
+    if (!set || !set.done) return 0;
+    const E = this.ENERGY;
+    const bw = bodyweightKg || Store.s.profile.weightKg || 75;
+
+    // Holds and carries do no net mechanical work — cost them by time.
+    if (entry.mode === 'time') {
+      return this.metKcalRaw(entry.met || E.metIsometric, (set.sec || 0) / 60, bw);
+    }
+
+    const reps = set.r || 0;
+    if (!reps) return 0;
+
+    const load = this.setLoadKg(entry, set, bw);
+    const rom = exerciseRom(entry.exercise, entry.group);
+
+    const workJ = load * E.g * rom * reps * (1 + E.eccentric);
+    const kcalWork = workJ / 4184 / E.efficiency;
+
+    const tutMin = reps * E.secPerRep / 60;
+    const kcalTension = this.metKcalRaw(E.metUnderLoad, tutMin, bw);
+
+    return kcalWork + kcalTension;
+  },
+
+  /** Rest between the completed sets of an entry, in minutes. */
+  entryRestMinutes(entry) {
+    const done = (entry.sets || []).filter(s => s.done).length;
+    if (done < 2) return 0;
+    return (done - 1) * (entry.restSec || Store.s.settings.restTimerSec || 90) / 60;
   },
 
   /** Estimated minutes under tension + rest for a resistance entry */
   entryMinutes(entry) {
     if (entry.mode === 'cardio') return entry.duration || 0;
-    if (entry.mode === 'time') return (entry.sets || []).reduce((m, s) => m + (s.done ? (s.sec || 0) / 60 + 1 : 0), 0);
-    const sets = (entry.sets || []).filter(s => s.done).length;
-    const rest = (entry.restSec || Store.s.settings.restTimerSec || 90) / 60;
-    return sets * (0.7 + rest);
+    if (entry.mode === 'time') {
+      return (entry.sets || []).reduce((m, s) => m + (s.done ? (s.sec || 0) / 60 : 0), 0) + this.entryRestMinutes(entry);
+    }
+    const tut = (entry.sets || []).reduce((m, s) => m + (s.done ? (s.r || 0) * this.ENERGY.secPerRep / 60 : 0), 0);
+    return tut + this.entryRestMinutes(entry);
+  },
+
+  /** Energy for a whole exercise: its sets plus the recovery between them. */
+  entryKcalRaw(entry, weightKg) {
+    const bw = weightKg || Store.s.profile.weightKg || 75;
+    if (entry.mode === 'cardio') {
+      // A machine-recorded figure beats any estimate, so prefer it when given.
+      if (entry.kcalMachine != null && entry.kcalMachine !== '') return +entry.kcalMachine;
+      return this.metKcalRaw(entry.met || 7, entry.duration || 0, bw);
+    }
+    const sets = (entry.sets || []).reduce((a, s) => a + this.setKcal(entry, s, bw), 0);
+    const rest = this.metKcalRaw(this.ENERGY.metRest, this.entryRestMinutes(entry), bw);
+    return sets + rest;
   },
 
   entryKcal(entry, weightKg) {
-    return this.metKcal(entry.met || 5, this.entryMinutes(entry), weightKg);
+    return Math.round(this.entryKcalRaw(entry, weightKg));
   },
 
-  /** Session-RPE training load = duration (min) x average RPE — Foster's method */
+  /** True when a cardio entry's calories came off the machine rather than a model. */
+  entryKcalMeasured(entry) {
+    return entry.mode === 'cardio' && entry.kcalMachine != null && entry.kcalMachine !== '';
+  },
+
+  /** Per-set energy rows for an exercise, used by the breakdown UI and exports. */
+  entryEnergyRows(entry, weightKg) {
+    const bw = weightKg || Store.s.profile.weightKg || 75;
+    return (entry.sets || []).map((s, i) => ({
+      index: i + 1,
+      done: !!s.done,
+      type: s.type || 'working',
+      kcal: this.setKcal(entry, s, bw),
+      loadKg: this.setLoadKg(entry, s, bw),
+      reps: s.r || 0,
+      sec: s.sec || 0
+    }));
+  },
+
+  /** Session-RPE training load = duration (min) x intensity — Foster's method.
+      Cardio carries its own intensity rating; resistance work uses a fixed
+      moderate value now that sets are not rated individually. */
   entryLoad(entry) {
     const mins = this.entryMinutes(entry);
     let rpe = entry.rpe;
-    if (!rpe && entry.sets && entry.sets.length) {
-      const rated = entry.sets.filter(s => s.done && s.rpe);
-      if (rated.length) rpe = rated.reduce((a, s) => a + s.rpe, 0) / rated.length;
-    }
-    if (!rpe) rpe = entry.mode === 'cardio' ? 6 : 7;
+    if (!rpe) rpe = entry.mode === 'cardio' ? 6 : 7.5;
     return Math.round(mins * rpe);
   },
 
@@ -486,27 +594,38 @@ const Calc = {
     const e = (day.workout && day.workout.entries) || [];
     const sum = {
       entries: e.length, sets: 0, reps: 0, volumeKg: 0, minutes: 0, kcal: 0, load: 0,
-      distanceKm: 0, bySection: { upper: 0, lower: 0, cardio: 0 }, groups: new Set(), avgRpe: 0
+      distanceKm: 0, bySection: { upper: 0, lower: 0, cardio: 0 }, groups: new Set(), avgRpe: 0,
+      byExercise: [], measuredKcal: 0, estimatedKcal: 0
     };
     let rpeN = 0, rpeSum = 0;
     e.forEach(en => {
       const vol = this.entryVolume(en);
+      const kcal = this.entryKcalRaw(en, weightKg);
       sum.sets += this.entrySets(en);
       sum.reps += this.entryReps(en);
       sum.volumeKg += vol;
       sum.minutes += this.entryMinutes(en);
-      sum.kcal += this.entryKcal(en, weightKg);
+      sum.kcal += kcal;
+      if (this.entryKcalMeasured(en)) sum.measuredKcal += kcal; else sum.estimatedKcal += kcal;
+      sum.byExercise.push({
+        id: en.id, name: en.exercise, group: en.groupName, section: en.section,
+        kcal: kcal, measured: this.entryKcalMeasured(en)
+      });
       sum.load += this.entryLoad(en);
       sum.distanceKm += en.distance || 0;
       sum.bySection[en.section] = (sum.bySection[en.section] || 0) + (en.section === 'cardio' ? this.entryMinutes(en) : vol);
       sum.groups.add(en.group);
-      (en.sets || []).forEach(s => { if (s.done && s.rpe) { rpeSum += s.rpe; rpeN++; } });
+      // Only cardio carries an intensity rating now that sets are not rated.
       if (en.rpe) { rpeSum += en.rpe; rpeN++; }
     });
     sum.avgRpe = rpeN ? round(rpeSum / rpeN, 1) : 0;
     sum.groupCount = sum.groups.size;
     sum.minutes = Math.round(sum.minutes);
     sum.volumeKg = Math.round(sum.volumeKg);
+    sum.byExercise.sort((a, b) => b.kcal - a.kcal);
+    sum.kcal = Math.round(sum.kcal);
+    sum.measuredKcal = Math.round(sum.measuredKcal);
+    sum.estimatedKcal = Math.round(sum.estimatedKcal);
     return sum;
   },
 

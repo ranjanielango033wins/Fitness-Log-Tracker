@@ -1,7 +1,7 @@
 /* FitLog service worker — caches the app shell so it opens offline.
    Bump CACHE when you change any file so browsers pick the new version up. */
 
-const CACHE = 'fitlog-v2';
+const CACHE = 'fitlog-v3';
 const SHELL = [
   './',
   './index.html',

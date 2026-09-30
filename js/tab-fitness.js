@@ -124,7 +124,6 @@ const Fitness = {
   /* ---------- summary ---------- */
   summaryHtml(w, total) {
     if (!total) return '';
-    const p = Store.s.profile;
     return `<div class="card">
       <div class="card-head"><h2>Session total</h2>
         <span class="pill">${w.entries} exercise${w.entries === 1 ? '' : 's'}</span></div>
@@ -132,10 +131,41 @@ const Fitness = {
         <div class="stat"><div class="k">Volume</div><div class="v">${fmtNum(Units.wOut(w.volumeKg))}<small>${Units.wLabel()}</small></div></div>
         <div class="stat"><div class="k">Sets</div><div class="v">${w.sets}</div><div class="d dim">${w.reps} reps</div></div>
         <div class="stat"><div class="k">Time</div><div class="v">${fmtMin(w.minutes)}</div></div>
-        <div class="stat"><div class="k">Energy</div><div class="v">${fmtNum(w.kcal)}<small>kcal</small></div></div>
+        <div class="stat"><div class="k">Energy</div><div class="v">${fmtNum(w.kcal)}<small>kcal</small></div>
+          ${w.measuredKcal ? `<div class="d dim">${fmtNum(w.measuredKcal)} from machines</div>` : ''}</div>
         <div class="stat"><div class="k">Load</div><div class="v">${fmtNum(w.load)}</div><div class="d dim">sRPE units</div></div>
-        ${w.avgRpe ? `<div class="stat"><div class="k">Avg RPE</div><div class="v">${w.avgRpe}</div></div>` : ''}
         ${w.distanceKm ? `<div class="stat"><div class="k">Distance</div><div class="v">${fmtNum(Units.dOut(w.distanceKm), 2)}<small>${Units.dLabel()}</small></div></div>` : ''}
+      </div>
+    </div>
+    ${this.energyHtml(w)}`;
+  },
+
+  /** Where the session's calories actually went, exercise by exercise. */
+  energyHtml(w) {
+    const rows = (w.byExercise || []).filter(x => x.kcal > 0);
+    if (rows.length < 2) return '';
+    const max = rows[0].kcal;
+    const colour = { upper: 'var(--train)', lower: 'var(--sleep)', cardio: 'var(--diet)' };
+    return `<div class="card">
+      <div class="card-head">
+        <span style="color:var(--warn)">${icon('flame')}</span>
+        <h3>Energy breakdown</h3>
+        <span class="pill">${fmtNum(w.kcal)} kcal</span>
+      </div>
+      <div class="energy-list">
+        ${rows.map(x => `
+          <div class="energy-row">
+            <div class="er-top">
+              <span class="er-name">${esc(x.name)}${x.measured ? '<span class="tag">machine</span>' : ''}</span>
+              <span class="er-val mono">${fmtNum(x.kcal, 1)}<span class="dim"> kcal · ${Math.round(x.kcal / w.kcal * 100)}%</span></span>
+            </div>
+            <div class="bar"><i style="width:${Math.max(2, x.kcal / max * 100)}%;background:${colour[x.section] || 'var(--acc)'}"></i></div>
+          </div>`).join('')}
+      </div>
+      <div class="chart-legend" style="margin-top:10px">
+        <span><i style="background:var(--train)"></i>Upper</span>
+        <span><i style="background:var(--sleep)"></i>Lower</span>
+        <span><i style="background:var(--diet)"></i>Cardio</span>
       </div>
     </div>`;
   },
@@ -156,16 +186,20 @@ const Fitness = {
     if (e.mode === 'cardio') return this.cardioEntryHtml(e, isPrToday);
 
     const isTime = e.mode === 'time';
-    const rows = (e.sets || []).map((s, i) => `
+    const bw = Store.s.profile.weightKg;
+    const rows = (e.sets || []).map((s, i) => {
+      const kc = Calc.setKcal(e, s, bw);
+      return `
       <tr class="${s.done ? 'done' : ''}" data-set="${i}">
         <td><div class="set-no ${s.type || ''}" data-settype="${i}" title="Tap to change set type">${s.type === 'warmup' ? 'W' : s.type === 'drop' ? 'D' : s.type === 'failure' ? 'F' : (i + 1)}</div></td>
         ${isTime
           ? `<td><input type="number" inputmode="numeric" data-f="sec" value="${s.sec || ''}" placeholder="60"></td>`
-          : `<td><input type="number" inputmode="decimal" step="0.5" data-f="w" value="${s.w != null ? round(Units.wOut(s.w), 2) : ''}" placeholder="0"></td>`}
+          : `<td><input type="number" inputmode="decimal" step="0.5" data-f="w" value="${s.w != null ? round(Units.wOut(s.w), 2) : ''}" placeholder="${e.mode === 'bodyweight' ? '+0' : '0'}"></td>`}
         <td><input type="number" inputmode="numeric" data-f="r" value="${s.r || ''}" placeholder="${isTime ? '–' : '0'}" ${isTime ? 'disabled' : ''}></td>
-        <td><input type="number" inputmode="decimal" step="0.5" min="1" max="10" data-f="rpe" value="${s.rpe || ''}" placeholder="–"></td>
+        <td><span class="set-kcal ${kc ? '' : 'dim'}">${kc ? round(kc, 1) : '–'}</span></td>
         <td><div class="chk ${s.done ? 'on' : ''}" data-done="${i}">${s.done ? icon('check') : ''}</div></td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     return `
     <div class="ex-card" data-entry="${e.id}">
@@ -180,9 +214,9 @@ const Fitness = {
         <table class="set-table">
           <thead><tr>
             <th>Set</th>
-            <th>${isTime ? 'Sec' : Units.wLabel()}</th>
+            <th>${isTime ? 'Sec' : (e.mode === 'bodyweight' ? '+' + Units.wLabel() : Units.wLabel())}</th>
             <th>Reps</th>
-            <th>RPE</th>
+            <th>kcal</th>
             <th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
@@ -197,6 +231,7 @@ const Fitness = {
         <span class="pill">Vol ${fmtNum(Units.wOut(Calc.entryVolume(e)))} ${Units.wLabel()}</span>
         ${best ? `<span class="pill">e1RM ${fmtNum(Units.wOut(best), 1)} ${Units.wLabel()}</span>` : ''}
         <span class="pill">${Calc.entrySets(e)} × ${Calc.entryReps(e)} reps</span>
+        <span class="pill kcal-pill">${icon('flame')} ${fmtNum(Calc.entryKcalRaw(e, Store.s.profile.weightKg), 1)} kcal</span>
         ${pr && !isPrToday ? `<span class="dim tiny nowrap">Best ${fmtNum(Units.wOut(pr.e1rm), 1)} ${Units.wLabel()} · ${shortDate(pr.date)}</span>` : ''}
       </div>
     </div>`;
@@ -205,6 +240,8 @@ const Fitness = {
   cardioEntryHtml(e) {
     const p = Store.s.profile;
     const kcal = Calc.entryKcal(e, p.weightKg);
+    const measured = Calc.entryKcalMeasured(e);
+    const estimate = Calc.metKcal(e.met || 7, e.duration || 0, p.weightKg);
     const pace = (e.distance && e.duration) ? round(e.duration / Units.dOut(e.distance), 2) : null;
     return `
     <div class="ex-card" data-entry="${e.id}">
@@ -221,17 +258,24 @@ const Fitness = {
             <input type="number" inputmode="numeric" data-cf="duration" value="${e.duration || ''}" placeholder="30"></label>
           <label class="fld"><span>Distance (${Units.dLabel()})</span>
             <input type="number" inputmode="decimal" step="0.01" data-cf="distance" value="${e.distance != null ? round(Units.dOut(e.distance), 2) : ''}" placeholder="5"></label>
+          <label class="fld"><span>Calories shown on the machine</span>
+            <input type="number" inputmode="numeric" data-cf="kcalMachine" value="${e.kcalMachine != null ? e.kcalMachine : ''}" placeholder="${estimate || 'e.g. 320'}"></label>
           <label class="fld"><span>Avg heart rate (bpm)</span>
             <input type="number" inputmode="numeric" data-cf="hr" value="${e.hr || ''}" placeholder="140"></label>
-          <label class="fld"><span>Intensity / RPE (1–10)</span>
+          <label class="fld"><span>Intensity (1–10)</span>
             <input type="number" inputmode="decimal" step="0.5" min="1" max="10" data-cf="rpe" value="${e.rpe || ''}" placeholder="6"></label>
+        </div>
+        <div class="dim tiny">
+          ${measured
+            ? `Using the machine's figure. FitLog would have estimated ${fmtNum(estimate)} kcal from duration and body weight.`
+            : 'Leave calories blank and FitLog estimates them from duration, intensity and your body weight.'}
         </div>
       </div>
       <div class="ex-foot">
         <span class="pill">${fmtMin(e.duration || 0)}</span>
         ${e.distance ? `<span class="pill">${fmtNum(Units.dOut(e.distance), 2)} ${Units.dLabel()}</span>` : ''}
         ${pace ? `<span class="pill">${pace} min/${Units.dLabel()}</span>` : ''}
-        <span class="pill">${fmtNum(kcal)} kcal</span>
+        <span class="pill kcal-pill">${icon('flame')} ${fmtNum(kcal)} kcal${measured ? ' · machine' : ''}</span>
         <span class="pill">Load ${Calc.entryLoad(e)}</span>
       </div>
     </div>`;
