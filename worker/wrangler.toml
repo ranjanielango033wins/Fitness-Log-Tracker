@@ -1,13 +1,17 @@
-# Cloudflare Worker config for the FitLog sync endpoint.
-# Only needed if you deploy with the wrangler CLI — the dashboard route in
-# README-worker.md needs no config file at all.
+# Deploying the sync worker from the command line.
+#
+#   npm install -g wrangler
+#   wrangler login
+#   wrangler kv namespace create FITLOG     # prints an id — paste it below
+#   wrangler deploy
+#
+# The dashboard route in README-worker.md needs none of this.
 
 name = "fitlog-sync"
 main = "worker.js"
 compatibility_date = "2026-01-01"
 
-# Replace id with the namespace id printed by:
-#   npx wrangler kv namespace create FITLOG
+# The code looks for a binding named exactly FITLOG.
 [[kv_namespaces]]
 binding = "FITLOG"
-id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+id = "PASTE_YOUR_NAMESPACE_ID_HERE"

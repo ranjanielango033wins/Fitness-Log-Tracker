@@ -18,7 +18,10 @@
    ========================================================================== */
 
 const CODE_RE = /^[a-f0-9]{32}$/;
-const MAX_BYTES = 4 * 1024 * 1024;   // KV allows 25 MB; 4 is far beyond a lifetime of logs
+
+/* KV accepts 25 MB per value. The client sends a compacted payload of roughly
+   4 KB per logged day, so this ceiling is about a decade of daily logging. */
+const MAX_BYTES = 20 * 1024 * 1024;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -75,8 +78,23 @@ export default {
       try { body = await request.json(); }
       catch (e) { return json({ error: 'bad_json' }, 400); }
 
-      if (!body || typeof body !== 'object' || typeof body.data !== 'object' || body.data === null) {
-        return json({ error: 'bad_body', message: 'Expected { rev: number, data: object }.' }, 400);
+      if (!body || typeof body !== 'object') {
+        return json({ error: 'bad_body', message: 'Expected a JSON object.' }, 400);
+      }
+
+      /* Two shapes are accepted. Modern clients gzip the log and send it as
+         base64 in `payload`; a browser without CompressionStream sends the
+         object in `data`. The worker never needs to read inside either. */
+      const compressed = body.enc === 'gzip' && typeof body.payload === 'string';
+      if (!compressed && (typeof body.data !== 'object' || body.data === null)) {
+        return json({ error: 'bad_body', message: 'Expected { rev, data } or { rev, enc, payload }.' }, 400);
+      }
+
+      /* A payload claiming no days would wipe a real log on the other devices.
+         The client states the count so this holds for the compressed shape too. */
+      const dayCount = compressed ? body.days : Object.keys(body.data.days || {}).length;
+      if (!Number.isFinite(dayCount) || dayCount < 0) {
+        return json({ error: 'bad_body', message: 'Payload did not state a day count.' }, 400);
       }
 
       const current = await env.FITLOG.get(key, 'json');
@@ -89,15 +107,15 @@ export default {
           error: 'conflict',
           rev: currentRev,
           updatedAt: current ? current.updatedAt : null,
+          enc: current ? current.enc : undefined,
+          payload: current ? current.payload : undefined,
           data: current ? current.data : null
         }, 409);
       }
 
-      const record = {
-        rev: currentRev + 1,
-        updatedAt: new Date().toISOString(),
-        data: body.data
-      };
+      const record = compressed
+        ? { rev: currentRev + 1, updatedAt: new Date().toISOString(), enc: 'gzip', days: dayCount, payload: body.payload }
+        : { rev: currentRev + 1, updatedAt: new Date().toISOString(), days: dayCount, data: body.data };
       const serialised = JSON.stringify(record);
 
       if (serialised.length > MAX_BYTES) {

@@ -33,6 +33,11 @@ const EX_LIB = {
           { n: 'Pec Deck / Machine Fly', eq: 'Machine', mode: 'strength', met: 5 },
           { n: 'Chest Press Machine', eq: 'Machine', mode: 'strength', met: 5 },
           { n: 'Smith Machine Bench Press', eq: 'Machine', mode: 'strength', met: 6 },
+          { n: 'Converging Chest Press', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Incline Chest Press Machine', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Decline Chest Press Machine', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Cable Fly (Mid)', eq: 'Cable', mode: 'strength', met: 5 },
+          { n: 'Assisted Chest Dip (Machine)', eq: 'Machine', mode: 'bodyweight', met: 5.5, assist: true },
           { n: 'Push-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 5 },
           { n: 'Incline Push-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 4 },
           { n: 'Decline Push-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 5.5 },
@@ -58,6 +63,16 @@ const EX_LIB = {
           { n: 'Chin-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 8 },
           { n: 'Inverted Row', eq: 'Bodyweight', mode: 'bodyweight', met: 5 },
           { n: 'Machine Row', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Seated Row Machine', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Diverging Seated Row', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Iso-Lateral Row', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Low Row Machine', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Diverging Lat Pulldown', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Iso-Lateral Lat Pulldown', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Chest-Supported T-Bar Row', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Meadows Row', eq: 'Barbell', mode: 'strength', met: 5.5 },
+          { n: 'Assisted Pull-Up (Machine)', eq: 'Machine', mode: 'bodyweight', met: 6, assist: true },
+          { n: 'Back Extension Machine', eq: 'Machine', mode: 'strength', met: 4 },
           { n: 'Back Extension / Hyperextension', eq: 'Bodyweight', mode: 'bodyweight', met: 4 },
           { n: 'Good Morning', eq: 'Barbell', mode: 'strength', met: 5 }
         ]
@@ -76,6 +91,8 @@ const EX_LIB = {
           { n: 'Rear Delt Fly (Machine)', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Rear Delt Fly (Cable)', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Reverse Pec Deck', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Lateral Raise Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Cable Front Raise', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Upright Row', eq: 'Barbell', mode: 'strength', met: 5 },
           { n: 'Landmine Press', eq: 'Barbell', mode: 'strength', met: 5.5 }
         ]
@@ -85,6 +102,7 @@ const EX_LIB = {
           { n: 'Barbell Shrug', eq: 'Barbell', mode: 'strength', met: 5 },
           { n: 'Dumbbell Shrug', eq: 'Dumbbell', mode: 'strength', met: 5 },
           { n: 'Cable Shrug', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'Trap Bar Shrug', eq: 'Barbell', mode: 'strength', met: 5 },
           { n: 'Farmer’s Carry', eq: 'Dumbbell', mode: 'time', met: 6 },
           { n: 'Neck Curl / Extension', eq: 'Plate', mode: 'strength', met: 3.5 }
         ]
@@ -100,6 +118,9 @@ const EX_LIB = {
           { n: 'Concentration Curl', eq: 'Dumbbell', mode: 'strength', met: 4 },
           { n: 'Cable Curl', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Arm Curl Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Cable Rope Hammer Curl', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'Bayesian Cable Curl', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'Zottman Curl', eq: 'Dumbbell', mode: 'strength', met: 4.5 },
           { n: 'Preacher Curl Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Spider Curl', eq: 'Dumbbell', mode: 'strength', met: 4 }
         ]
@@ -113,6 +134,10 @@ const EX_LIB = {
           { n: 'Cable Pushdown (Rope)', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Overhead Cable Extension', eq: 'Cable', mode: 'strength', met: 4.5 },
           { n: 'Triceps Dip', eq: 'Bodyweight', mode: 'bodyweight', met: 6 },
+          { n: 'Assisted Dip (Machine)', eq: 'Machine', mode: 'bodyweight', met: 5, assist: true },
+          { n: 'Triceps Extension Machine', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Single-Arm Cable Pushdown', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'JM Press', eq: 'Barbell', mode: 'strength', met: 5.5 },
           { n: 'Bench Dip', eq: 'Bodyweight', mode: 'bodyweight', met: 5 },
           { n: 'Diamond Push-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 5.5 },
           { n: 'Kickback', eq: 'Dumbbell', mode: 'strength', met: 4 }
@@ -134,6 +159,11 @@ const EX_LIB = {
           { n: 'Hanging Leg Raise', eq: 'Bodyweight', mode: 'bodyweight', met: 5 },
           { n: 'Captain’s Chair Knee Raise', eq: 'Bodyweight', mode: 'bodyweight', met: 4.5 },
           { n: 'Cable Crunch', eq: 'Cable', mode: 'strength', met: 4 },
+          { n: 'Abdominal Crunch Machine', eq: 'Machine', mode: 'strength', met: 4 },
+          { n: 'Rotary Torso Machine', eq: 'Machine', mode: 'strength', met: 4 },
+          { n: 'Cable Woodchop', eq: 'Cable', mode: 'strength', met: 4.5 },
+          { n: 'Decline Sit-Up', eq: 'Bodyweight', mode: 'bodyweight', met: 4.5 },
+          { n: 'Hanging Knee Raise', eq: 'Bodyweight', mode: 'bodyweight', met: 4.5 },
           { n: 'Crunch', eq: 'Bodyweight', mode: 'bodyweight', met: 3.8 },
           { n: 'Bicycle Crunch', eq: 'Bodyweight', mode: 'bodyweight', met: 4.5 },
           { n: 'Russian Twist', eq: 'Plate', mode: 'bodyweight', met: 4 },
@@ -160,6 +190,12 @@ const EX_LIB = {
           { n: 'Smith Machine Squat', eq: 'Machine', mode: 'strength', met: 5.5 },
           { n: 'Hack Squat', eq: 'Machine', mode: 'strength', met: 5.5 },
           { n: 'Leg Press', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Seated Leg Press', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Incline Leg Press (45°)', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Pendulum Squat', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Belt Squat', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'V-Squat Machine', eq: 'Machine', mode: 'strength', met: 5.5 },
+          { n: 'Smith Machine Lunge', eq: 'Machine', mode: 'strength', met: 5.5 },
           { n: 'Goblet Squat', eq: 'Dumbbell', mode: 'strength', met: 5 },
           { n: 'Bulgarian Split Squat', eq: 'Dumbbell', mode: 'strength', met: 5.5 },
           { n: 'Walking Lunge', eq: 'Dumbbell', mode: 'strength', met: 6 },
@@ -178,6 +214,7 @@ const EX_LIB = {
           { n: 'Single-Leg RDL', eq: 'Dumbbell', mode: 'strength', met: 5 },
           { n: 'Lying Leg Curl', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Seated Leg Curl', eq: 'Machine', mode: 'strength', met: 4.5 },
+          { n: 'Standing Leg Curl', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Nordic Hamstring Curl', eq: 'Bodyweight', mode: 'bodyweight', met: 5 },
           { n: 'Glute-Ham Raise', eq: 'Machine', mode: 'bodyweight', met: 5 },
           { n: 'Cable Pull-Through', eq: 'Cable', mode: 'strength', met: 5 }
@@ -189,6 +226,9 @@ const EX_LIB = {
           { n: 'Glute Bridge', eq: 'Bodyweight', mode: 'bodyweight', met: 4 },
           { n: 'Single-Leg Hip Thrust', eq: 'Bodyweight', mode: 'bodyweight', met: 4.5 },
           { n: 'Cable Kickback', eq: 'Cable', mode: 'strength', met: 4 },
+          { n: 'Glute Kickback Machine', eq: 'Machine', mode: 'strength', met: 4 },
+          { n: 'Hip Thrust Machine', eq: 'Machine', mode: 'strength', met: 5 },
+          { n: 'Reverse Hyperextension', eq: 'Machine', mode: 'strength', met: 4.5 },
           { n: 'Hip Abduction Machine', eq: 'Machine', mode: 'strength', met: 4 },
           { n: 'Sumo Deadlift', eq: 'Barbell', mode: 'strength', met: 6 },
           { n: 'Curtsy Lunge', eq: 'Dumbbell', mode: 'strength', met: 5.5 },
@@ -198,6 +238,8 @@ const EX_LIB = {
       {
         id: 'calves', name: 'Calves', ex: [
           { n: 'Standing Calf Raise', eq: 'Machine', mode: 'strength', met: 4 },
+          { n: 'Donkey Calf Raise', eq: 'Machine', mode: 'strength', met: 4 },
+          { n: 'Smith Machine Calf Raise', eq: 'Machine', mode: 'strength', met: 4 },
           { n: 'Seated Calf Raise', eq: 'Machine', mode: 'strength', met: 4 },
           { n: 'Leg Press Calf Raise', eq: 'Machine', mode: 'strength', met: 4 },
           { n: 'Dumbbell Calf Raise', eq: 'Dumbbell', mode: 'strength', met: 4 },
@@ -264,9 +306,13 @@ const EX_LIB = {
           { n: 'Rowing Machine (Moderate)', eq: 'Rower', mode: 'cardio', met: 7.0 },
           { n: 'Rowing Machine (Vigorous)', eq: 'Rower', mode: 'cardio', met: 8.5 },
           { n: 'Elliptical (Moderate)', eq: 'Elliptical', mode: 'cardio', met: 5.0 },
+          { n: 'Elliptical (Light)', eq: 'Elliptical', mode: 'cardio', met: 4.0 },
           { n: 'Elliptical (Vigorous)', eq: 'Elliptical', mode: 'cardio', met: 7.5 },
           { n: 'Stair Climber', eq: 'Stepper', mode: 'cardio', met: 9.0 },
           { n: 'SkiErg', eq: 'Other', mode: 'cardio', met: 8.0 },
+          { n: 'Arc Trainer', eq: 'Elliptical', mode: 'cardio', met: 6.5 },
+          { n: 'Versaclimber', eq: 'Other', mode: 'cardio', met: 9.5 },
+          { n: 'Recumbent Bike', eq: 'Bike', mode: 'cardio', met: 5.0 },
           { n: 'Ski / Curved Treadmill', eq: 'Treadmill', mode: 'cardio', met: 9.5 }
         ]
       },
@@ -309,7 +355,8 @@ const EX_FLAT = (() => {
       g.ex.forEach(e => out.push({
         section: sec.id, sectionLabel: sec.label,
         groupId: g.id, groupName: g.name,
-        name: e.n, eq: e.eq, mode: e.mode, met: e.met
+        name: e.n, eq: e.eq, mode: e.mode, met: e.met,
+        assist: !!e.assist
       }));
     });
   });
@@ -405,7 +452,25 @@ const ROM_BY_EXERCISE = {
 
   /* power */
   'Power Clean': 0.75, 'Hang Clean': 0.60, 'Clean & Jerk': 1.05, 'Snatch': 0.95,
-  'Kettlebell Swing': 0.60, 'Box Jump': 0.40, 'Broad Jump': 0.35
+  'Kettlebell Swing': 0.60, 'Box Jump': 0.40, 'Broad Jump': 0.35,
+
+  /* machines added for commercial-gym coverage */
+  'Converging Chest Press': 0.45, 'Incline Chest Press Machine': 0.42,
+  'Decline Chest Press Machine': 0.40, 'Cable Fly (Mid)': 0.58,
+  'Assisted Chest Dip (Machine)': 0.45, 'Assisted Dip (Machine)': 0.45,
+  'Assisted Pull-Up (Machine)': 0.62,
+  'Seated Row Machine': 0.50, 'Diverging Seated Row': 0.50, 'Iso-Lateral Row': 0.50,
+  'Low Row Machine': 0.48, 'Diverging Lat Pulldown': 0.58, 'Iso-Lateral Lat Pulldown': 0.58,
+  'Chest-Supported T-Bar Row': 0.45, 'Meadows Row': 0.50, 'Back Extension Machine': 0.40,
+  'Lateral Raise Machine': 0.50, 'Cable Front Raise': 0.55, 'Trap Bar Shrug': 0.15,
+  'Cable Rope Hammer Curl': 0.36, 'Bayesian Cable Curl': 0.40, 'Zottman Curl': 0.38,
+  'Triceps Extension Machine': 0.36, 'Single-Arm Cable Pushdown': 0.35, 'JM Press': 0.35,
+  'Abdominal Crunch Machine': 0.35, 'Rotary Torso Machine': 0.40, 'Cable Woodchop': 0.70,
+  'Decline Sit-Up': 0.45, 'Hanging Knee Raise': 0.45,
+  'Seated Leg Press': 0.42, 'Incline Leg Press (45°)': 0.48, 'Pendulum Squat': 0.55,
+  'Belt Squat': 0.50, 'V-Squat Machine': 0.52, 'Smith Machine Lunge': 0.45,
+  'Standing Leg Curl': 0.38, 'Glute Kickback Machine': 0.40, 'Hip Thrust Machine': 0.35,
+  'Reverse Hyperextension': 0.50, 'Donkey Calf Raise': 0.16, 'Smith Machine Calf Raise': 0.16
 };
 
 /* Share of bodyweight actually lifted in a calisthenic movement. A push-up
@@ -422,10 +487,110 @@ const BW_LOAD_FRACTION = {
   'Sissy Squat': 0.70, 'Nordic Hamstring Curl': 0.60, 'Glute-Ham Raise': 0.55,
   'Glute Bridge': 0.35, 'Single-Leg Hip Thrust': 0.45,
   'Single-Leg Calf Raise': 0.90, 'Tibialis Raise': 0.25,
-  'Cossack Squat': 0.70, 'Box Jump': 1.00, 'Broad Jump': 1.00
+  'Cossack Squat': 0.70, 'Box Jump': 1.00, 'Broad Jump': 1.00,
+  'Decline Sit-Up': 0.40, 'Hanging Knee Raise': 0.35,
+  /* assisted machines carry full bodyweight; the stack subtracts from it */
+  'Assisted Pull-Up (Machine)': 1.00, 'Assisted Dip (Machine)': 0.95,
+  'Assisted Chest Dip (Machine)': 0.95
 };
 
 const BW_LOAD_DEFAULT = 0.65;
+
+/* ==========================================================================
+   Aliases
+
+   People type an exercise before they find it in the list, and they type it
+   differently each time: LEG PRESS, Seated Leg Press, INCLINED LEG PRESS. Each
+   spelling became its own history, so progress on one movement was split three
+   ways. These map typed spellings onto the canonical entry; the picker searches
+   them, and the v2 migration rewrites existing logs so the history merges.
+
+   Keys are compared case-insensitively with punctuation and spacing collapsed.
+   ========================================================================== */
+const EX_ALIASES = {
+  'leg press': 'Leg Press',
+  'seated leg press': 'Seated Leg Press',
+  'inclined leg press': 'Incline Leg Press (45°)',
+  'incline leg press': 'Incline Leg Press (45°)',
+  '45 degree leg press': 'Incline Leg Press (45°)',
+  'barbell squat': 'Back Squat',
+  'squat': 'Back Squat',
+  'bb squat': 'Back Squat',
+  'seated row': 'Seated Row Machine',
+  'manual seated row': 'Seated Row Machine',
+  'cable row': 'Seated Cable Row',
+  'diverging seated row': 'Diverging Seated Row',
+  'diverging lat pulldown': 'Diverging Lat Pulldown',
+  'lat pulldown': 'Lat Pulldown (Wide Grip)',
+  'lat pull down': 'Lat Pulldown (Wide Grip)',
+  'abdominal crunch': 'Abdominal Crunch Machine',
+  'ab crunch machine': 'Abdominal Crunch Machine',
+  'crunch machine': 'Abdominal Crunch Machine',
+  'triceps extension': 'Triceps Extension Machine',
+  'triceps extensions': 'Triceps Extension Machine',
+  'tricep extension': 'Triceps Extension Machine',
+  'tricep extensions': 'Triceps Extension Machine',
+  'tricep extension machine': 'Triceps Extension Machine',
+  'triceps extension machine': 'Triceps Extension Machine',
+  'bench press': 'Barbell Bench Press',
+  'incline bench press': 'Incline Barbell Bench Press',
+  'shoulder press': 'Machine Shoulder Press',
+  'overhead press': 'Overhead Press (Barbell)',
+  'ohp': 'Overhead Press (Barbell)',
+  'deadlift': 'Deadlift (Conventional)',
+  'rdl': 'Romanian Deadlift',
+  'lateral raise': 'Dumbbell Lateral Raise',
+  'side raise': 'Dumbbell Lateral Raise',
+  'rear delt fly': 'Rear Delt Fly (Machine)',
+  'reverse fly': 'Rear Delt Fly (Machine)',
+  'bicep curl': 'Dumbbell Curl',
+  'biceps curl': 'Dumbbell Curl',
+  'arm curl': 'Arm Curl Machine',
+  'leg curl': 'Seated Leg Curl',
+  'leg extension': 'Leg Extension',
+  'calf raise': 'Standing Calf Raise',
+  'hip thrust': 'Barbell Hip Thrust',
+  'chest press': 'Chest Press Machine',
+  'pec fly': 'Pec Deck / Machine Fly',
+  'pec deck': 'Pec Deck / Machine Fly',
+  'assisted pull up': 'Assisted Pull-Up (Machine)',
+  'assisted pullup': 'Assisted Pull-Up (Machine)',
+  'assisted dip': 'Assisted Dip (Machine)',
+  'pull up': 'Pull-Up',
+  'pullup': 'Pull-Up',
+  'chin up': 'Chin-Up',
+  'push up': 'Push-Up',
+  'pushup': 'Push-Up',
+  'back extension': 'Back Extension / Hyperextension',
+  'hyperextension': 'Back Extension / Hyperextension',
+  'treadmill': 'Treadmill Walk (5 km/h)',
+  'elliptical': 'Elliptical (Moderate)',
+  'cross trainer': 'Elliptical (Moderate)',
+  'stairmaster': 'Stair Climber',
+  'stair master': 'Stair Climber',
+  'cycling': 'Stationary Bike (Moderate)',
+  'rowing': 'Rowing Machine (Moderate)',
+  'rower': 'Rowing Machine (Moderate)'
+};
+
+/** Collapse a typed name so spelling noise does not matter. */
+function normaliseExName(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** The canonical exercise a typed name refers to, or null if it is genuinely new. */
+function resolveExerciseName(typed) {
+  if (!typed) return null;
+  if (EX_BY_NAME[typed]) return typed;
+  const key = normaliseExName(typed);
+  if (EX_ALIASES[key]) return EX_ALIASES[key];
+  // exact match ignoring case and punctuation
+  const hit = EX_FLAT.find(e => normaliseExName(e.name) === key);
+  return hit ? hit.name : null;
+}
 
 function exerciseRom(name, groupId) {
   return ROM_BY_EXERCISE[name] || ROM_BY_GROUP[groupId] || 0.40;
@@ -434,4 +599,10 @@ function exerciseRom(name, groupId) {
 function bodyweightFraction(name) {
   const f = BW_LOAD_FRACTION[name];
   return f == null ? BW_LOAD_DEFAULT : f;
+}
+
+/** True for assisted machines, where the stack REDUCES the load instead of adding to it. */
+function isAssisted(name) {
+  const e = EX_BY_NAME[name];
+  return !!(e && e.assist);
 }

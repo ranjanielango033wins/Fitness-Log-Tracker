@@ -289,18 +289,24 @@ const Fitness = {
     $$('[data-entry]', host).forEach(card => {
       const id = card.dataset.entry;
 
-      // set field edits
+      // set field edits — clamped so an impossible number never reaches storage
       $$('.set-table input', card).forEach(inp => {
         inp.addEventListener('change', () => {
           const e = findEntry(id); if (!e) return;
           const i = +inp.closest('tr').dataset.set;
           const f = inp.dataset.f;
           const raw = inp.value === '' ? null : +inp.value;
-          if (f === 'w') e.sets[i].w = raw == null ? null : round(Units.wIn(raw), 3);
-          else e.sets[i][f] = raw;
-          if (raw != null && !e.sets[i].done && (f === 'w' || f === 'r' || f === 'sec')) {
-            const s = e.sets[i];
-            if ((s.w != null && s.r) || s.sec) { /* leave for explicit tick */ }
+          if (f === 'w') {
+            const kg = raw == null ? null : clamp(round(Units.wIn(raw), 3), 'weightKg');
+            e.sets[i].w = kg;
+            if (kg != null && Math.abs(Units.wOut(kg) - raw) > 0.01) {
+              inp.value = round(Units.wOut(kg), 2);
+              toast(`Weight capped at ${Units.fmtW(LIMITS.weightKg.max, 0)}`, 'warn');
+            }
+          } else {
+            const v = clamp(raw, f === 'r' ? 'reps' : 'seconds');
+            e.sets[i][f] = v;
+            if (v != null && v !== raw) { inp.value = v; toast('Value adjusted to a sensible range', 'warn'); }
           }
           Store.save(); App.refreshSoft();
         });
@@ -332,12 +338,23 @@ const Fitness = {
         Store.save(); App.render();
       });
 
-      // cardio fields
+      // cardio fields — each clamped to its own plausible range
+      const CF_KIND = { duration: 'duration', distance: 'distanceKm', kcalMachine: 'kcal', hr: 'hr', rpe: 'rpe' };
       $$('[data-cf]', card).forEach(inp => inp.addEventListener('change', () => {
         const e = findEntry(id); if (!e) return;
         const f = inp.dataset.cf;
         const raw = inp.value === '' ? null : +inp.value;
-        e[f] = f === 'distance' ? (raw == null ? null : round(Units.dIn(raw), 3)) : raw;
+        if (f === 'distance') {
+          e.distance = raw == null ? null : clamp(round(Units.dIn(raw), 3), 'distanceKm');
+        } else {
+          const v = clamp(raw, CF_KIND[f]);
+          e[f] = v;
+          if (v != null && raw != null && v !== raw) {
+            inp.value = v;
+            const l = LIMITS[CF_KIND[f]];
+            toast(`Kept within ${l.min}–${l.max}`, 'warn');
+          }
+        }
         Store.save(); App.render();
       }));
 
@@ -411,7 +428,7 @@ const Fitness = {
         rows.push({ k, e });
       });
     });
-    const meta = EX_BY_NAME[name];
+    const meta = Store.findExercise(name);
     const chartVals = rows.slice(0, 14).reverse().map(r => round(Units.wOut(Calc.entryBestE1rm(r.e)), 1));
     const chartLabels = rows.slice(0, 14).reverse().map(r => shortDate(r.k));
     openSheet({
@@ -506,17 +523,25 @@ const Fitness = {
 
     const draw = () => {
       const pk = $('#pk', s.sheet);
+      const all = Store.allExercises();
       let list;
       if (q.trim()) {
         const t = q.trim().toLowerCase();
-        list = EX_FLAT.filter(e => e.name.toLowerCase().includes(t) || e.groupName.toLowerCase().includes(t));
+        const nt = normaliseExName(q);
+        // match the name, the muscle group, or any alias someone might type
+        const aliasHit = EX_ALIASES[nt];
+        list = all.filter(e =>
+          e.name.toLowerCase().includes(t) ||
+          e.groupName.toLowerCase().includes(t) ||
+          (e.eq || '').toLowerCase().includes(t) ||
+          (aliasHit && e.name === aliasHit));
       } else {
-        list = EX_FLAT.filter(e => e.section === sec.id && (!group || e.groupId === group));
+        list = all.filter(e => e.section === sec.id && (!group || e.groupId === group));
       }
       const recent = this.recentExercises(sec.id);
       pk.innerHTML = `
         <div class="search-wrap">${icon('search')}
-          <input id="pq" placeholder="Search all exercises…" value="${esc(q)}" autocomplete="off"></div>
+          <input id="pq" placeholder="Search ${all.length} exercises…" value="${esc(q)}" autocomplete="off"></div>
         ${q.trim() ? '' : `
           <div class="section-title">Muscle group</div>
           <div class="chips" style="margin-bottom:14px">
@@ -530,18 +555,20 @@ const Fitness = {
         <div class="section-title">${q.trim() ? `${list.length} match${list.length === 1 ? '' : 'es'}` : 'Exercises'}</div>
         <div class="card flush"><div class="list">
           ${list.map(e => `<div class="row click" data-pick="${esc(e.name)}">
-            <div class="grow"><div class="t">${esc(e.name)}</div>
-            <div class="s">${esc(e.groupName)} · ${esc(e.eq)}${q.trim() ? ' · ' + esc(e.sectionLabel) : ''}</div></div>
-            ${icon('plus')}</div>`).join('') || '<div class="empty small">Nothing matched</div>'}
+            <div class="grow"><div class="t">${esc(e.name)}${e.custom ? '<span class="tag custom">mine</span>' : ''}${e.assist ? '<span class="tag">assisted</span>' : ''}</div>
+            <div class="s">${esc(e.groupName)} · ${esc(e.eq)}${q.trim() ? ' · ' + esc(e.sectionLabel || '') : ''}</div></div>
+            ${icon('plus')}</div>`).join('') || `<div class="empty small">
+              <b>Nothing matched “${esc(q)}”</b>
+              <div>Add it as your own and it is saved for next time</div></div>`}
         </div></div>
-        <button class="btn block ghost" id="pk-custom" style="margin-top:12px">${icon('plus')} Add a custom exercise</button>`;
+        <button class="btn block ghost" id="pk-custom" style="margin-top:12px">${icon('plus')} Add ${q.trim() ? `“${esc(q.trim())}”` : 'a custom exercise'}</button>`;
 
       const qi = $('#pq', pk);
       qi.oninput = () => { q = qi.value; const at = qi.selectionStart; draw(); const n = $('#pq', s.sheet); n.focus(); n.setSelectionRange(at, at); };
       $$('[data-g]', pk).forEach(b => b.onclick = () => { group = b.dataset.g || null; draw(); });
       $$('[data-pick]', pk).forEach(b => b.onclick = () => { this.addExercise(b.dataset.pick); s.close(); });
       $$('[data-quick]', pk).forEach(b => b.onclick = () => { this.addExercise(b.dataset.quick); s.close(); });
-      $('#pk-custom', pk).onclick = () => { s.close(); this.customExerciseSheet(); };
+      $('#pk-custom', pk).onclick = () => { s.close(); this.customExerciseSheet(q.trim()); };
     };
     draw();
   },
@@ -556,12 +583,15 @@ const Fitness = {
     return seen;
   },
 
-  customExerciseSheet() {
+  customExerciseSheet(prefill) {
     const sec = EX_LIB[this.section];
     const s = openSheet({
-      title: 'Custom exercise',
+      title: 'Your own exercise',
       body: `
-        <label class="fld"><span>Exercise name</span><input id="cx-n" placeholder="e.g. Reverse Nordic Curl"></label>
+        <p class="muted small">Saved to your exercise list, so you only type it once and the history builds up
+          under one name.</p>
+        <label class="fld"><span>Exercise name</span>
+          <input id="cx-n" placeholder="e.g. Reverse Nordic Curl" value="${esc(prefill || '')}"></label>
         <label class="fld"><span>Muscle group</span><select id="cx-g">
           ${sec.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></label>
         <div class="fld-row">
@@ -571,27 +601,50 @@ const Fitness = {
             <option value="time">Time held</option>
             ${sec.id === 'cardio' ? '<option value="cardio" selected>Duration / distance</option>' : ''}
           </select></label>
-          <label class="fld"><span>Equipment</span><input id="cx-e" placeholder="Barbell" value="Other"></label>
-        </div>`,
-      foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="cx-s">Add</button>`
+          <label class="fld"><span>Equipment</span><input id="cx-e" placeholder="Machine" value="Machine"></label>
+        </div>
+        <label class="fld"><span>Range of motion in metres — optional, sharpens the calorie estimate</span>
+          <input type="number" step="0.01" id="cx-rom" placeholder="e.g. 0.45 for a bench press"></label>
+        <label class="switch" style="margin-bottom:4px"><input type="checkbox" id="cx-assist">
+          <span class="track"></span><span>Assisted machine — the weight reduces the load</span></label>`,
+      foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="cx-s">Save &amp; add</button>`
     });
     $('#cx-s', s.sheet).onclick = () => {
       const name = $('#cx-n', s.sheet).value.trim();
       if (!name) return toast('Give the exercise a name', 'warn');
+
+      // If it is really one we already know under another spelling, use that.
+      const canonical = resolveExerciseName(name);
+      if (canonical) {
+        s.close();
+        this.addExercise(canonical);
+        toast(`Matched to ${canonical}`, 'good');
+        return;
+      }
+      if (Store.findExercise(name)) { s.close(); this.addExercise(name); return; }
+
       const gid = $('#cx-g', s.sheet).value;
       const g = sec.groups.find(x => x.id === gid);
       const mode = $('#cx-m', s.sheet).value;
-      this.addExercise(name, {
+      const def = {
+        id: 'cx' + uid(),
+        name,
         section: sec.id, groupId: gid, groupName: g.name, mode,
         eq: $('#cx-e', s.sheet).value.trim() || 'Other',
-        met: mode === 'cardio' ? 7 : 5
-      });
+        met: mode === 'cardio' ? 7 : 5,
+        rom: clamp($('#cx-rom', s.sheet).value, null) || null,
+        assist: $('#cx-assist', s.sheet).checked
+      };
+      Store.s.customExercises.push(def);
+      Store.save();
       s.close();
+      this.addExercise(name);
+      toast('Saved to your exercises', 'good');
     };
   },
 
   addExercise(name, override) {
-    const meta = override || EX_BY_NAME[name];
+    const meta = override || Store.findExercise(name);
     if (!meta) return toast('Exercise not found', 'bad');
     const day = Store.day(App.date, true);
     if (!day.workout.startedAt && App.date === todayKey()) day.workout.startedAt = nowTime();

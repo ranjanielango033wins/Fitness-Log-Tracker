@@ -6,9 +6,11 @@
    ========================================================================== */
 
 const PERIODS = {
-  day:   { label: 'Day',     days: 1,  prevLabel: 'Yesterday' },
-  week:  { label: 'Week',    days: 7,  prevLabel: 'Previous week' },
-  month: { label: '4 weeks', days: 28, prevLabel: 'Previous 4 weeks' }
+  day:    { label: 'Day',      days: 1,   prevLabel: 'Yesterday' },
+  week:   { label: 'Week',     days: 7,   prevLabel: 'Previous week' },
+  month:  { label: '4 weeks',  days: 28,  prevLabel: 'Previous 4 weeks' },
+  q:      { label: '3 months', days: 91,  prevLabel: 'Previous 3 months' },
+  half:   { label: '6 months', days: 182, prevLabel: 'Previous 6 months' }
 };
 
 const Overview = {
@@ -50,6 +52,8 @@ const Overview = {
       App.render();
     });
     $$('[data-jump]', host).forEach(b => b.onclick = () => App.go(b.dataset.jump));
+    const hist = $('#ov-history', host);
+    if (hist) hist.onclick = () => History.open();
   },
 
   /* ---------- period picker ---------- */
@@ -77,6 +81,7 @@ const Overview = {
           </div>
           <button class="btn ghost icon" data-off="-1" title="Later" ${this.offset === 0 ? 'disabled' : ''}>${icon('right')}</button>
         </div>
+        <button class="btn block sm ghost" id="ov-history" style="margin-top:10px">${icon('calendar')} Browse every logged day</button>
       </div>
       <div class="seg wide hide" id="ov-seg">
         ${Object.entries(PERIODS).map(([id, p]) =>
@@ -198,22 +203,44 @@ const Overview = {
   /* ---------- trend chart ---------- */
   trendHtml(keys) {
     const p = Store.s.profile, t = Targets.current();
+    const consistency = Calc.sleepConsistency(keys);     // once, not once per day
     const tr = [], nu = [], re = [];
     keys.forEach(k => {
       const d = Store.day(k);
       tr.push(Calc.trainingScore(d, p));
       nu.push(Calc.nutritionScore(d, t));
-      re.push(Calc.recoveryScore(d, keys, p, t));
+      re.push(Calc.recoveryScore(d, keys, p, t, consistency));
     });
     if (![...tr, ...nu, ...re].some(v => v != null)) return '';
-    const labels = keys.map(shortDate);
+
+    // Past a month, daily points are noise — show weekly means instead.
+    const weekly = keys.length > 45;
+    let labels, series;
+    if (weekly) {
+      const bucket = arr => {
+        const out = [];
+        for (let i = 0; i < arr.length; i += 7) {
+          const slice = arr.slice(i, i + 7).filter(v => v != null);
+          out.push(slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : null);
+        }
+        return out;
+      };
+      labels = [];
+      for (let i = 0; i < keys.length; i += 7) labels.push(shortDate(keys[i]));
+      series = [bucket(tr), bucket(nu), bucket(re)];
+    } else {
+      labels = keys.map(shortDate);
+      series = [tr, nu, re];
+    }
+
     return `<div class="card">
-      <div class="card-head"><h3>Daily scores through the period</h3></div>
+      <div class="card-head"><h3>Scores through the period</h3>
+        ${weekly ? '<span class="pill">weekly average</span>' : ''}</div>
       ${lineChart(labels, [
-        { label: 'Training', color: CHART_COLORS.train, values: tr },
-        { label: 'Nutrition', color: CHART_COLORS.diet, values: nu },
-        { label: 'Recovery', color: CHART_COLORS.sleep, values: re }
-      ], { min: 0, max: 100, height: 160 })}
+        { label: 'Training', color: CHART_COLORS.train, values: series[0] },
+        { label: 'Nutrition', color: CHART_COLORS.diet, values: series[1] },
+        { label: 'Recovery', color: CHART_COLORS.sleep, values: series[2] }
+      ], { min: 0, max: 100, height: 160, markers: labels.length <= 32 })}
       <div class="chart-legend">
         <span><i style="background:var(--train)"></i>Training</span>
         <span><i style="background:var(--diet)"></i>Nutrition</span>

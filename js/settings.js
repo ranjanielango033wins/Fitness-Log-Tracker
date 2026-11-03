@@ -110,11 +110,16 @@ const Settings = {
       </div>
       <input type="file" id="b-file" accept="application/json,.json,.fitlog" class="hide">
       <div class="kv"><span class="kk">Days stored</span><span class="vv">${Store.loggedDays().length}</span></div>
-      <div class="kv"><span class="kk">Custom foods · recipes</span><span class="vv">${Store.s.customFoods.length} · ${Store.s.recipes.length}</span></div>
+      <div class="kv"><span class="kk">Custom foods · recipes · exercises</span>
+        <span class="vv">${Store.s.customFoods.length} · ${Store.s.recipes.length} · ${(Store.s.customExercises || []).length}</span></div>
       <div class="kv"><span class="kk">Last backup</span>
         <span class="vv">${Store.s.meta.lastBackup ? esc(new Date(Store.s.meta.lastBackup).toLocaleString()) : 'never'}</span></div>
-      <div class="kv"><span class="kk">Storage used</span><span class="vv">${this.storageSize()}</span></div>
+      <div class="kv"><span class="kk">Stored in</span><span class="vv" id="st-engine">${Persist.mode === 'idb' ? 'IndexedDB' : Persist.mode === 'local' ? 'localStorage (fallback)' : 'memory only'}</span></div>
+      <div class="kv"><span class="kk">Space used</span><span class="vv" id="st-usage">measuring…</span></div>
       <div class="kv"><span class="kk">Sync</span><span class="vv">${Sync.paired ? 'on' : 'off'}</span></div>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn grow" id="b-health">${icon('activity')} Check my data</button>
+      </div>
 
       <div class="section-title">Danger zone</div>
       <div class="btn-row">
@@ -288,9 +293,63 @@ const Settings = {
 
   storageSize() {
     try {
-      const b = new Blob([localStorage.getItem(STORAGE_KEY) || '']).size;
+      const b = new Blob([JSON.stringify(Store.s)]).size;
       return b > 1024 * 1024 ? round(b / 1024 / 1024, 2) + ' MB' : round(b / 1024, 1) + ' KB';
     } catch (e) { return '–'; }
+  },
+
+  /** Fill in the measured figure once the browser answers. */
+  async paintUsage(root) {
+    const el = $('#st-usage', root);
+    if (!el) return;
+    const own = this.storageSize();
+    const u = await Persist.usage();
+    if (u.quota) {
+      const pct = Math.round(u.bytes / u.quota * 100);
+      el.innerHTML = `${own} <span class="dim">of ${round(u.quota / 1024 / 1024 / 1024, 1)} GB available</span>`;
+      if (pct > 80) el.innerHTML += ` <span style="color:var(--bad)">· ${pct}% full</span>`;
+    } else {
+      el.textContent = own;
+    }
+  },
+
+  /** A plain-language check over everything stored, with a repair button. */
+  healthSheet() {
+    const issues = DataHealth.scan();
+    const s = openSheet({
+      title: 'Data health',
+      wide: true,
+      body: `
+        <div class="stat-grid" style="margin-bottom:14px">
+          <div class="stat"><div class="k">Days</div><div class="v">${Store.loggedDays().length}</div></div>
+          <div class="stat"><div class="k">Exercises logged</div><div class="v">${DataHealth.exerciseCount()}</div></div>
+          <div class="stat"><div class="k">Issues found</div>
+            <div class="v" style="color:${issues.length ? 'var(--warn)' : 'var(--good)'}">${issues.length}</div></div>
+          <div class="stat"><div class="k">Stored in</div><div class="v" style="font-size:14px">${Persist.mode === 'idb' ? 'IndexedDB' : Persist.mode}</div></div>
+        </div>
+        ${issues.length ? `
+          <div class="section-title">What I found</div>
+          <div class="card flush"><div class="list">
+            ${issues.slice(0, 60).map(i => `<div class="row">
+              <span style="color:${i.severity === 'bad' ? 'var(--bad)' : 'var(--warn)'}">${icon('alert')}</span>
+              <div class="grow"><div class="t">${esc(i.title)}</div><div class="s">${esc(i.detail)}</div></div></div>`).join('')}
+            ${issues.length > 60 ? `<div class="row"><div class="s dim">…and ${issues.length - 60} more</div></div>` : ''}
+          </div></div>
+          <p class="dim tiny" style="margin-top:10px">Repairing clamps out-of-range numbers and merges exercise names.
+            It never deletes a workout, a meal or a night.</p>`
+        : `<div class="empty">${icon('check')}<b>Everything checks out</b>
+             <div class="small">No out-of-range values, no orphaned references, no unreadable days.</div></div>`}`,
+      foot: issues.length
+        ? `<button class="btn" data-close>Close</button><button class="btn primary" id="h-fix">Repair ${issues.length}</button>`
+        : `<button class="btn primary" data-close>Close</button>`
+    });
+    const fix = $('#h-fix', s.sheet);
+    if (fix) fix.onclick = () => {
+      const n = DataHealth.repair();
+      s.close();
+      App.render();
+      toast(`${n} fixed`, 'good');
+    };
   },
 
   bind(s) {
@@ -335,6 +394,9 @@ const Settings = {
     });
 
     $('#b-export', root).onclick = () => Backup.export();
+    const health = $('#b-health', root);
+    if (health) health.onclick = () => this.healthSheet();
+    this.paintUsage(root);
     $('#b-import', root).onclick = () => $('#b-file', root).click();
     $('#b-file', root).onchange = e => {
       const f = e.target.files[0];
@@ -378,8 +440,7 @@ const Backup = {
       days: Object.keys(Store.s.days).length,
       data: Store.s
     };
-    download(this.filename(), JSON.stringify(payload, null, 2), 'application/json');
-    Store.s.meta.lastBackup = new Date().toISOString();
+    download(this.filename(), JSON.stringify(payload, null, 2), 'application/json');    Store.s.meta.lastBackup = new Date().toISOString();
     Store.save();
     toast('Backup downloaded', 'good');
   },

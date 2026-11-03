@@ -60,6 +60,45 @@ const Sync = {
     return base + '#pair=' + (code || this.code);
   },
 
+  /* ---------- compression ----------
+
+     Two years of logging is nearly 3 MB of JSON. Pushing that on every change
+     would mean tens of megabytes of upload across a single gym session, which
+     is unkind to a phone on mobile data and wasteful of the store. Gzip takes
+     it down by roughly a factor of ten. Browsers without CompressionStream
+     simply send plain JSON, and the worker accepts either. */
+
+  get canCompress() { return typeof CompressionStream === 'function'; },
+
+  async gzipB64(text) {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
+    const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < buf.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+  },
+
+  async gunzipB64(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).text();
+  },
+
+  /** Unwrap whatever shape the server handed back. */
+  async readRemote(remote) {
+    if (!remote) return null;
+    if (remote.enc === 'gzip' && remote.payload) {
+      try { return JSON.parse(await this.gunzipB64(remote.payload)); }
+      catch (e) { throw new Error('Could not read the stored copy'); }
+    }
+    return remote.data || null;
+  },
+
   /* ---------- lifecycle ---------- */
 
   init() {
@@ -192,9 +231,10 @@ const Sync = {
     const res = await fetch(`${url}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
     if (!res.ok) throw new Error(this.httpMessage(res.status));
     const remote = await res.json();
+    const remoteData = await this.readRemote(remote);
 
     const before = Merge.payload(Store.s);
-    const merged = Merge.merge(before, remote.data);
+    const merged = Merge.merge(before, remoteData);
 
     // Adopt the merge locally first, so a failed push still leaves this device
     // holding everything it just learned from the server.
@@ -210,20 +250,33 @@ const Sync = {
     if (changedLocally && typeof App !== 'undefined') App.render();
 
     // Nothing to send if the server already holds exactly this.
-    if (remote.data && Merge.same(remote.data, canonical)) {
+    if (remoteData && Merge.same(remoteData, canonical)) {
       Store.s.sync.rev = remote.rev;
       this.set('ok');
       return true;
     }
 
+    const body = { rev: remote.rev, days: Object.keys(canonical.days || {}).length };
+    const plain = JSON.stringify(canonical, compactReplacer);
+    if (this.canCompress) {
+      try {
+        body.enc = 'gzip';
+        body.payload = await this.gzipB64(plain);
+      } catch (e) {
+        delete body.enc; delete body.payload;
+        body.data = canonical;
+      }
+    } else {
+      body.data = canonical;
+    }
+
     const put = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rev: remote.rev, data: canonical })
+      body: body.payload ? JSON.stringify(body) : JSON.stringify(body, compactReplacer)
     });
 
-    if (put.status === 409) return this.roundTrip(attempt + 1);
-    if (put.status === 413) throw new Error('Log too large for the sync store');
+    if (put.status === 409) return this.roundTrip(attempt + 1);    if (put.status === 413) throw new Error('Log too large for the sync store');
     if (!put.ok) throw new Error(this.httpMessage(put.status));
 
     const done = await put.json();

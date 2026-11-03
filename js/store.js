@@ -5,7 +5,177 @@
    ========================================================================== */
 
 const STORAGE_KEY = 'fitlog.v1';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+
+/* ==========================================================================
+   Persistence
+
+   localStorage was the original home, and it does not scale: browsers cap it
+   around 5 MB per site, and a day of full logging — workout, every meal, water,
+   sleep — runs to several kilobytes. Two years of that overflows, and the
+   failure mode is the worst kind: the write throws, the newest day is lost, and
+   nothing says so.
+
+   IndexedDB has no such ceiling (hundreds of megabytes, and it can ask for
+   more), and its writes are transactional, so a half-written state is not a
+   state the app can ever read back. It is the primary store. localStorage
+   stays as the fallback for browsers that block IndexedDB — private windows
+   on some platforms — and as the source for the one-time migration.
+   ========================================================================== */
+
+const IDB_NAME = 'fitlog';
+const IDB_STORE = 'state';
+const IDB_KEY = 'main';
+
+const Persist = {
+  db: null,
+  mode: 'memory',          // idb | local | memory
+  lastError: null,
+
+  async open() {
+    if (this.db) return this.db;
+    if (!('indexedDB' in window)) return null;
+    try {
+      this.db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => reject(new Error('IndexedDB blocked'));
+        // Safari in a private window can hang here rather than erroring.
+        setTimeout(() => reject(new Error('IndexedDB timed out')), 4000);
+      });
+      this.db.onversionchange = () => { try { this.db.close(); } catch (e) {} this.db = null; };
+      this.mode = 'idb';
+      return this.db;
+    } catch (e) {
+      this.lastError = e;
+      this.db = null;
+      return null;
+    }
+  },
+
+  async idbGet(key) {
+    const db = await this.open();
+    if (!db) return undefined;
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async idbPut(key, value) {
+    const db = await this.open();
+    if (!db) throw new Error('no IndexedDB');
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
+    });
+  },
+
+  /** Load the newest copy, preferring IndexedDB and falling back to localStorage. */
+  async read() {
+    let fromIdb = null;
+    try { fromIdb = await this.idbGet(IDB_KEY); } catch (e) { this.lastError = e; }
+
+    let fromLocal = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) fromLocal = JSON.parse(raw);
+    } catch (e) { /* unreadable or blocked — IndexedDB may still have it */ }
+
+    if (fromIdb && fromLocal) {
+      // Both exist: an older build wrote localStorage. Keep whichever is newer.
+      const idbStamp = stateStamp(fromIdb), localStamp = stateStamp(fromLocal);
+      return { data: localStamp > idbStamp ? fromLocal : fromIdb, migratedFromLocal: localStamp > idbStamp };
+    }
+    if (fromIdb) return { data: fromIdb, migratedFromLocal: false };
+    if (fromLocal) return { data: fromLocal, migratedFromLocal: true };
+    return { data: null, migratedFromLocal: false };
+  },
+
+  /** Write. IndexedDB first; localStorage only as a fallback store. */
+  async write(obj) {
+    if (this.mode !== 'local') {
+      try {
+        await this.idbPut(IDB_KEY, obj);
+        this.mode = 'idb';
+        this.lastError = null;
+        return 'idb';
+      } catch (e) {
+        this.lastError = e;
+        this.mode = 'local';
+      }
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj, compactReplacer));
+      this.lastError = null;
+      return 'local';
+    } catch (e) {
+      this.lastError = e;
+      this.mode = 'memory';
+      throw e;
+    }
+  },
+
+  /** Drop the legacy localStorage copy once IndexedDB holds the data. */
+  clearLocalMirror() {
+    if (this.mode !== 'idb') return;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* nothing to do */ }
+  },
+
+  async usage() {
+    const out = { bytes: 0, quota: 0, mode: this.mode };
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        out.bytes = est.usage || 0;
+        out.quota = est.quota || 0;
+      }
+    } catch (e) { /* unsupported */ }
+    return out;
+  },
+
+  /** Ask the browser not to evict us — iOS clears unused sites after 7 days. */
+  async persistRequest() {
+    try {
+      if (navigator.storage && navigator.storage.persist) {
+        if (await navigator.storage.persisted()) return true;
+        return await navigator.storage.persist();
+      }
+    } catch (e) { /* unsupported */ }
+    return false;
+  }
+};
+
+/** Rough "how recently was this written" for choosing between two copies. */
+function stateStamp(s) {
+  if (!s || typeof s !== 'object') return 0;
+  let max = 0;
+  const bump = v => { if (typeof v === 'number' && v > max) max = v; };
+  bump((s.profile || {})._m);
+  bump((s.settings || {})._m);
+  Object.values(s.days || {}).forEach(d => bump((d || {})._m));
+  return max;
+}
+
+/** Omit nulls, empty strings and empty collections — roughly halves the payload.
+    Only fields whose absence rehydrates to the same meaning are dropped: a
+    false that defaults to true must survive, or the setting would flip. */
+function compactReplacer(key, value) {
+  if (value === null || value === undefined) return undefined;
+  if (value === '' && key !== 'name') return undefined;
+  if (Array.isArray(value) && value.length === 0) return undefined;
+  if ((key === 'customFood' || key === 'recipe' || key === 'done') && value === false) return undefined;
+  return value;
+}
 
 /* ---------- date helpers ---------- */
 const DAY_MS = 86400000;
@@ -83,11 +253,12 @@ function defaultState() {
     },
     days: {},
     customFoods: [],
+    customExercises: [],
     recipes: [],
     customSleepFields: [],
     /* tombstones so a deletion on one device propagates instead of being
        resurrected by the other device's copy */
-    _del: { days: {}, customFoods: {}, recipes: {}, customSleepFields: {} },
+    _del: { days: {}, customFoods: {}, recipes: {}, customSleepFields: {}, customExercises: {} },
     /* device-local, never uploaded */
     sync: {
       code: null,          // 32 hex chars — the pairing secret
@@ -103,51 +274,260 @@ function defaultState() {
 
 /* Parts of the state that travel between devices. `sync` is deliberately
    absent — each device keeps its own code, rev and status. */
-const SYNCED_LISTS = ['customFoods', 'recipes', 'customSleepFields'];
+const SYNCED_LISTS = ['customFoods', 'recipes', 'customSleepFields', 'customExercises'];
+
+/* ==========================================================================
+   Validation
+
+   Every numeric input is clamped on the way in. The first release trusted the
+   field, and a real log came back with a cardio intensity of 25 on a 1–10
+   scale, nineteen times — which silently multiplied that session's training
+   load by three and dragged the workload ratio with it. Nothing warned,
+   because nothing checked.
+   ========================================================================== */
+const LIMITS = {
+  weightKg:   { min: 0,   max: 1000 },
+  reps:       { min: 0,   max: 500 },
+  seconds:    { min: 0,   max: 7200 },
+  rpe:        { min: 1,   max: 10 },
+  duration:   { min: 0,   max: 600 },
+  distanceKm: { min: 0,   max: 500 },
+  hr:         { min: 25,  max: 250 },
+  kcal:       { min: 0,   max: 20000 },
+  waterMl:    { min: 0,   max: 5000 },
+  latency:    { min: 0,   max: 600 },
+  awakeMin:   { min: 0,   max: 900 },
+  awakenings: { min: 0,   max: 50 },
+  napMin:     { min: 0,   max: 900 },
+  grams:      { min: 0,   max: 20000 },
+  age:        { min: 10,  max: 110 },
+  heightCm:   { min: 80,  max: 260 },
+  bodyKg:     { min: 20,  max: 400 },
+  restSec:    { min: 0,   max: 900 },
+  sleepH:     { min: 3,   max: 14 },
+  servings:   { min: 1,   max: 100 }
+};
+
+/** Clamp to a named range. Returns null for blank so "unset" stays unset. */
+function clamp(value, kind) {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  if (!isFinite(n)) return null;
+  const l = LIMITS[kind];
+  if (!l) return n;
+  return Math.min(l.max, Math.max(l.min, n));
+}
+
+/** Clamp but keep a sensible value rather than null — for required settings. */
+function clampTo(value, kind, fallback) {
+  const v = clamp(value, kind);
+  return v == null ? fallback : v;
+}
 
 /* ---------- store ---------- */
 const Store = {
   s: defaultState(),
   listeners: [],
+  repairLog: [],
+  saveTimer: null,
+  writeFailed: false,
 
-  load() {
+  async load() {
+    let migratedFromLocal = false;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        this.s = this.migrate(parsed);
+      const got = await Persist.read();
+      if (got.data) {
+        this.s = this.migrate(got.data);
+        migratedFromLocal = got.migratedFromLocal;
       }
     } catch (e) {
       console.warn('FitLog: could not read saved data, starting fresh.', e);
+      this.repairLog.push('Saved data could not be read — started from an empty log.');
     }
     if (!this.s.sync.deviceId) this.s.sync.deviceId = uid() + uid();
     this.seedShadow();
+
+    // First run on this build: move the localStorage copy into IndexedDB.
+    if (migratedFromLocal) {
+      try {
+        await Persist.write(this.s);
+        Persist.clearLocalMirror();
+      } catch (e) { /* stays in localStorage, which still works */ }
+    }
+    Persist.persistRequest();
     return this.s;
   },
 
   migrate(obj) {
     const base = defaultState();
+    if (!obj || typeof obj !== 'object') return base;
+    const fromVersion = +obj.v || 1;
     const merged = Object.assign({}, base, obj);
+
     merged.profile = Object.assign({}, base.profile, obj.profile || {});
     merged.settings = Object.assign({}, base.settings, obj.settings || {});
     merged.settings.targets = Object.assign({}, base.settings.targets, (obj.settings || {}).targets || {});
-    merged.days = obj.days || {};
-    merged.customFoods = obj.customFoods || [];
-    merged.recipes = obj.recipes || [];
-    merged.customSleepFields = obj.customSleepFields || [];
+    merged.days = (obj.days && typeof obj.days === 'object') ? obj.days : {};
+    SYNCED_LISTS.forEach(k => { merged[k] = Array.isArray(obj[k]) ? obj[k] : []; });
     merged.meta = Object.assign({}, base.meta, obj.meta || {});
     merged.sync = Object.assign({}, base.sync, obj.sync || {});
     merged._del = Object.assign({}, base._del, obj._del || {});
     ['days'].concat(SYNCED_LISTS).forEach(k => { if (!merged._del[k]) merged._del[k] = {}; });
     merged.v = SCHEMA_VERSION;
-    // ensure every day has the full shape
+
+    /* profile and settings sanity */
+    merged.profile.age = clampTo(merged.profile.age, 'age', base.profile.age);
+    merged.profile.heightCm = clampTo(merged.profile.heightCm, 'heightCm', base.profile.heightCm);
+    merged.profile.weightKg = clampTo(merged.profile.weightKg, 'bodyKg', base.profile.weightKg);
+    merged.settings.restTimerSec = clampTo(merged.settings.restTimerSec, 'restSec', 90);
+    merged.settings.targets.sleepH = clampTo(merged.settings.targets.sleepH, 'sleepH', 8);
+
+    /* days: normalise shape, repair values, drop anything unusable */
+    const repairs = [];
     Object.keys(merged.days).forEach(k => {
-      merged.days[k] = Object.assign(blankDay(), merged.days[k]);
-      merged.days[k].workout = Object.assign(blankDay().workout, merged.days[k].workout || {});
-      merged.days[k].diet = Object.assign(blankDay().diet, merged.days[k].diet || {});
-      merged.days[k].diet.meals = Object.assign(blankDay().diet.meals, merged.days[k].diet.meals || {});
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !merged.days[k] || typeof merged.days[k] !== 'object') {
+        delete merged.days[k];
+        repairs.push(`Removed an entry stored under an invalid date (${String(k).slice(0, 20)}).`);
+        return;
+      }
+      merged.days[k] = this.repairDay(merged.days[k], k, fromVersion, repairs, merged);
     });
+
+    /* custom exercises typed before they could be saved */
+    if (fromVersion < 2) this.harvestCustomExercises(merged, repairs);
+
+    this.repairLog = repairs;
     return merged;
+  },
+
+  /** Normalise one day and clamp everything inside it. */
+  repairDay(dayIn, key, fromVersion, repairs, state) {
+    const blank = blankDay();
+    const d = Object.assign(blank, dayIn);
+    d.workout = Object.assign(blankDay().workout, dayIn.workout || {});
+    d.diet = Object.assign(blankDay().diet, dayIn.diet || {});
+    d.diet.meals = Object.assign(blankDay().diet.meals, (dayIn.diet || {}).meals || {});
+    Object.keys(d.diet.meals).forEach(slot => {
+      if (!Array.isArray(d.diet.meals[slot])) d.diet.meals[slot] = [];
+    });
+    if (!Array.isArray(d.diet.waterLog)) d.diet.waterLog = [];
+    if (!Array.isArray(d.workout.entries)) d.workout.entries = [];
+    d.weightKg = clamp(d.weightKg, 'bodyKg');
+
+    d.workout.entries = d.workout.entries.filter(e => e && typeof e === 'object').map(e => {
+      if (!e.id) e.id = uid();
+
+      /* V2: fold typed spellings onto the canonical exercise so history merges */
+      if (fromVersion < 2 && e.exercise) {
+        const canonical = resolveExerciseName(e.exercise);
+        if (canonical && canonical !== e.exercise) {
+          repairs.push(`${key}: "${e.exercise}" matched to ${canonical}.`);
+          const meta = EX_BY_NAME[canonical];
+          e.exercise = canonical;
+          if (meta) {
+            e.section = meta.section; e.group = meta.groupId;
+            e.groupName = meta.groupName; e.eq = meta.eq;
+            e.mode = meta.mode; e.met = meta.met;
+          }
+        }
+      }
+
+      /* V2: calories typed into the note, before the field existed */
+      if (fromVersion < 2 && e.mode === 'cardio' && e.kcalMachine == null && e.note) {
+        const m = e.note.match(/(\d{2,5})\s*(?:k?cal|calorie)/i) || e.note.match(/^(\d{2,5})\b/);
+        if (m) {
+          const kc = clamp(+m[1], 'kcal');
+          if (kc) {
+            e.kcalMachine = kc;
+            repairs.push(`${key}: read ${kc} kcal out of the note on ${e.exercise}.`);
+          }
+        }
+      }
+
+      e.rpe = clamp(e.rpe, 'rpe');
+      e.duration = clamp(e.duration, 'duration');
+      e.distance = clamp(e.distance, 'distanceKm');
+      e.hr = clamp(e.hr, 'hr');
+      e.kcalMachine = clamp(e.kcalMachine, 'kcal');
+      e.restSec = clampTo(e.restSec, 'restSec', 90);
+      if (typeof e.note !== 'string') e.note = '';
+
+      if (Array.isArray(e.sets)) {
+        e.sets = e.sets.filter(s => s && typeof s === 'object').map(s => ({
+          w: clamp(s.w, 'weightKg'),
+          r: clamp(s.r, 'reps'),
+          sec: clamp(s.sec, 'seconds'),
+          done: !!s.done,
+          type: ['warmup', 'drop', 'failure'].includes(s.type) ? s.type : null
+        }));
+      } else if (e.mode !== 'cardio') {
+        e.sets = [];
+      }
+      return e;
+    });
+
+    d.diet.waterLog = d.diet.waterLog
+      .filter(w => w && typeof w === 'object')
+      .map(w => ({ t: typeof w.t === 'string' ? w.t : '', ml: clamp(w.ml, 'waterMl') || 0 }))
+      .filter(w => w.ml > 0);
+
+    Object.keys(d.diet.meals).forEach(slot => {
+      d.diet.meals[slot] = d.diet.meals[slot].filter(it => it && typeof it === 'object').map(it => {
+        if (!it.id) it.id = uid();
+        it.grams = clamp(it.grams, 'grams') || 0;
+        it.kcal = clamp(it.kcal, 'kcal') || 0;
+        ['p', 'c', 'f', 'fib'].forEach(m => { it[m] = clamp(it[m], 'grams') || 0; });
+        if (typeof it.name !== 'string' || !it.name) it.name = 'Unnamed item';
+        return it;
+      });
+    });
+
+    if (d.sleep && typeof d.sleep === 'object') {
+      const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
+      if (!hhmm.test(d.sleep.bed || '')) d.sleep.bed = '';
+      if (!hhmm.test(d.sleep.wake || '')) d.sleep.wake = '';
+      d.sleep.latencyMin = clamp(d.sleep.latencyMin, 'latency');
+      d.sleep.awakeMin = clamp(d.sleep.awakeMin, 'awakeMin');
+      d.sleep.awakenings = clamp(d.sleep.awakenings, 'awakenings');
+      d.sleep.quality = clamp(d.sleep.quality, 'rpe');
+      if (d.sleep.quality != null) d.sleep.quality = Math.min(5, Math.max(1, Math.round(d.sleep.quality)));
+      d.sleep.naps = Array.isArray(d.sleep.naps)
+        ? d.sleep.naps.map(n => ({ min: clamp((n || {}).min, 'napMin') || 0 })).filter(n => n.min > 0)
+        : [];
+      if (!d.sleep.custom || typeof d.sleep.custom !== 'object') d.sleep.custom = {};
+      if (typeof d.sleep.note !== 'string') d.sleep.note = '';
+      if (!d.sleep.bed && !d.sleep.wake && !d.sleep.naps.length) d.sleep = null;
+    } else {
+      d.sleep = null;
+    }
+
+    if (typeof d.notes !== 'string') d.notes = '';
+    return d;
+  },
+
+  /** Pull every exercise that was typed by hand into a reusable saved list. */
+  harvestCustomExercises(state, repairs) {
+    const known = new Set(Object.keys(EX_BY_NAME));
+    const seen = new Set((state.customExercises || []).map(e => e.name));
+    Object.values(state.days).forEach(d => {
+      ((d.workout || {}).entries || []).forEach(e => {
+        if (!e.exercise || known.has(e.exercise) || seen.has(e.exercise)) return;
+        seen.add(e.exercise);
+        state.customExercises.push({
+          id: 'cx' + uid(),
+          name: e.exercise,
+          section: e.section || 'upper',
+          groupId: e.group || 'core',
+          groupName: e.groupName || 'Other',
+          eq: e.eq || 'Other',
+          mode: e.mode || 'strength',
+          met: e.met || 5,
+          rom: null,
+          _m: 1
+        });
+        repairs.push(`Saved "${e.exercise}" as one of your own exercises.`);
+      });
+    });
   },
 
   /* ------------------------------------------------------------------
@@ -162,6 +542,8 @@ const Store = {
      ------------------------------------------------------------------ */
 
   _shadow: null,
+  _active: new Set(),
+  _version: 0,
 
   _partStr(obj) {
     if (!obj) return '';
@@ -189,27 +571,45 @@ const Store = {
     if (!this.s.profile._m) this.s.profile._m = 1;
     if (!this.s.settings._m) this.s.settings._m = 1;
     this._shadow = sh;
+    this._active.clear();
+    this._version++;
   },
 
-  /** Stamp whatever differs from the shadow, and tombstone whatever vanished. */
+  /** Stamp whatever differs from the shadow, and tombstone whatever vanished.
+
+      Only days the app has opened for writing are re-serialised. Diffing every
+      stored day on every save meant a keystroke cost one JSON.stringify per day
+      on record — fine at thirty days, several megabytes of churn at two years.
+      Deletions are still caught, because comparing key sets is cheap. */
   stampChanges() {
     if (!this._shadow) { this.seedShadow(); return false; }
     const now = Date.now();
     const sh = this._shadow;
     let dirty = false;
 
-    // days
-    const seenDays = {};
-    Object.entries(this.s.days).forEach(([k, d]) => {
-      seenDays[k] = true;
+    // days that were opened for writing since the last save
+    this._active.forEach(k => {
+      const d = this.s.days[k];
+      if (!d) return;
       const str = this._partStr(d);
       if (sh.days[k] !== str) { d._m = now; sh.days[k] = str; dirty = true; delete this.s._del.days[k]; }
     });
+    this._active.clear();
+
+    // additions and deletions, from the key sets alone
+    Object.keys(this.s.days).forEach(k => {
+      if (sh.days[k] === undefined) {
+        sh.days[k] = this._partStr(this.s.days[k]);
+        this.s.days[k]._m = now;
+        delete this.s._del.days[k];
+        dirty = true;
+      }
+    });
     Object.keys(sh.days).forEach(k => {
-      if (!seenDays[k]) { delete sh.days[k]; this.s._del.days[k] = now; dirty = true; }
+      if (!this.s.days[k]) { delete sh.days[k]; this.s._del.days[k] = now; dirty = true; }
     });
 
-    // id-keyed lists
+    // id-keyed lists stay small enough to diff whole
     SYNCED_LISTS.forEach(name => {
       const shelf = sh.lists[name] || (sh.lists[name] = {});
       const seen = {};
@@ -229,20 +629,42 @@ const Store = {
     const sStr = this._partStr(this.s.settings);
     if (sh.settings !== sStr) { this.s.settings._m = now; sh.settings = sStr; dirty = true; }
 
+    if (dirty) this._version++;
     return dirty;
   },
 
   save(opts) {
     const dirty = this.stampChanges();
+    this._version++;                      // any save invalidates derived caches
+
+    // Write off the critical path; the in-memory state is what the UI reads.
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.flush(), 120);
+
+    this.listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
+    if (dirty && !(opts && opts.fromSync) && typeof Sync !== 'undefined') Sync.schedulePush();
+    return dirty;
+  },
+
+  /** Push the in-memory state to disk. Safe to call at any time. */
+  async flush() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.s));
+      await Persist.write(this.s);
+      if (this.writeFailed) {
+        this.writeFailed = false;
+        if (typeof toast === 'function') toast('Saving again — storage recovered', 'good');
+      }
     } catch (e) {
       console.error('FitLog: save failed', e);
-      if (typeof toast === 'function') toast('Storage full — export a backup and clear old data', 'warn');
+      if (!this.writeFailed) {
+        this.writeFailed = true;
+        if (typeof toast === 'function') {
+          toast('Storage is full — export a backup now', 'bad');
+        }
+      }
     }
-    this.listeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
-    // Local data is already safe; pushing to the cloud is best-effort and debounced.
-    if (dirty && !(opts && opts.fromSync) && typeof Sync !== 'undefined') Sync.schedulePush();
   },
 
   onChange(fn) { this.listeners.push(fn); },
@@ -252,6 +674,8 @@ const Store = {
       if (!create) return blankDay();
       this.s.days[k] = blankDay();
     }
+    // Opened for writing: remember it so the next save only diffs what moved.
+    if (create) this._active.add(k);
     return this.s.days[k];
   },
 
@@ -260,6 +684,29 @@ const Store = {
   /** All day keys that hold any data, sorted ascending */
   loggedDays() {
     return Object.keys(this.s.days).filter(k => dayHasData(this.s.days[k])).sort();
+  },
+
+  /** The exercise library plus anything the user has added. */
+  allExercises() {
+    const custom = (this.s.customExercises || []).map(c => ({
+      section: c.section, sectionLabel: (EX_LIB[c.section] || {}).label || 'Other',
+      groupId: c.groupId, groupName: c.groupName,
+      name: c.name, eq: c.eq, mode: c.mode, met: c.met,
+      assist: !!c.assist, custom: true, rom: c.rom || null
+    }));
+    return EX_FLAT.concat(custom);
+  },
+
+  findExercise(name) {
+    const custom = (this.s.customExercises || []).find(c => c.name === name);
+    if (custom) {
+      return {
+        section: custom.section, groupId: custom.groupId, groupName: custom.groupName,
+        name: custom.name, eq: custom.eq, mode: custom.mode, met: custom.met,
+        assist: !!custom.assist, custom: true, rom: custom.rom || null
+      };
+    }
+    return EX_BY_NAME[name] || null;
   },
 
   /** Restore from a backup or a merge. `restamp` makes the incoming copy win
@@ -490,13 +937,22 @@ const Calc = {
     metIsometric: 4.0     // planks, holds, carries
   },
 
-  /** What the set actually moved, in kg — bodyweight movements included. */
+  /** What the set actually moved, in kg — bodyweight movements included.
+      On an assisted machine the stack carries part of you, so it is subtracted
+      rather than added; logging 27 kg of assistance is not a 27 kg pull-up. */
   setLoadKg(entry, set, bodyweightKg) {
-    const added = set.w || 0;
-    if (entry.mode === 'bodyweight') {
-      return bodyweightKg * bodyweightFraction(entry.exercise) + added;
-    }
-    return added;
+    const stack = set.w || 0;
+    if (entry.mode !== 'bodyweight') return stack;
+    const share = bodyweightKg * bodyweightFraction(entry.exercise);
+    if (isAssisted(entry.exercise)) return Math.max(bodyweightKg * 0.15, share - stack);
+    return share + stack;
+  },
+
+  /** Range of motion for an entry, honouring a value set on a custom exercise. */
+  romFor(entry) {
+    const custom = (Store.s.customExercises || []).find(c => c.name === entry.exercise);
+    if (custom && custom.rom) return custom.rom;
+    return exerciseRom(entry.exercise, entry.group);
   },
 
   /** Energy cost of one completed set, in kcal. */
@@ -514,7 +970,7 @@ const Calc = {
     if (!reps) return 0;
 
     const load = this.setLoadKg(entry, set, bw);
-    const rom = exerciseRom(entry.exercise, entry.group);
+    const rom = this.romFor(entry);
 
     const workJ = load * E.g * rom * reps * (1 + E.eccentric);
     const kcalWork = workJ / 4184 / E.efficiency;
@@ -664,6 +1120,10 @@ const Calc = {
     const naps = (s.naps || []).reduce((a, n) => a + (n.min || 0), 0);
     const tst = Math.max(0, tib - latency - awake);                  // total sleep time
     const efficiency = tib > 0 ? round(tst / tib * 100, 1) : 0;
+    /* With neither a time-to-sleep nor a time-awake recorded, efficiency is
+       arithmetically 100% and means nothing. Saying so is more useful than
+       printing a perfect score nobody earned. */
+    const efficiencyKnown = s.latencyMin != null || s.awakeMin != null;
     // mid-sleep clock position in minutes from midnight (for consistency scoring)
     const [bh, bm] = s.bed.split(':').map(Number);
     let bedMin = bh * 60 + bm;
@@ -672,7 +1132,7 @@ const Calc = {
     return {
       tibMin: tib, tstMin: tst, napMin: naps, totalMin: tst + naps,
       hours: round(tst / 60, 2), totalHours: round((tst + naps) / 60, 2),
-      efficiency, latency, awake, awakenings: s.awakenings || 0,
+      efficiency, efficiencyKnown, latency, awake, awakenings: s.awakenings || 0,
       quality: s.quality || null, midSleep,
       bed: s.bed, wake: s.wake
     };
@@ -737,16 +1197,24 @@ const Calc = {
     return Math.round(kcalScore * 0.35 + protScore * 0.35 + waterScore * 0.2 + fibScore * 0.1);
   },
 
-  /** Recovery: sleep quantity, efficiency, subjective quality, hydration */
-  recoveryScore(day, keys, p, targets) {
+  /** Recovery: sleep quantity, efficiency, subjective quality, hydration.
+      `consistency` is passed in rather than recomputed: working it out inside
+      this function made period aggregation O(n squared), which showed up as a
+      visible stall the moment a range covered a few months. */
+  recoveryScore(day, keys, p, targets, consistency) {
     const s = this.sleepSummary(day);
     if (!s) return null;
     const durScore = Math.min(100, Math.round(s.totalHours / targets.sleepH * 100));
-    const effScore = Math.min(100, Math.round(s.efficiency / 90 * 100));
     const qualScore = s.quality ? s.quality / 5 * 100 : 70;
-    const cons = this.sleepConsistency(keys);
+    const cons = consistency === undefined ? this.sleepConsistency(keys) : consistency;
     const consScore = cons == null ? 70 : cons;
     const wakeScore = Math.max(0, 100 - (s.awakenings || 0) * 12);
+
+    if (!s.efficiencyKnown) {
+      // No efficiency to judge; spread its weight over what was actually recorded.
+      return Math.round(durScore * 0.47 + qualScore * 0.25 + consScore * 0.18 + wakeScore * 0.10);
+    }
+    const effScore = Math.min(100, Math.round(s.efficiency / 90 * 100));
     return Math.round(durScore * 0.35 + effScore * 0.22 + qualScore * 0.18 + consScore * 0.15 + wakeScore * 0.10);
   },
 
@@ -768,6 +1236,7 @@ const Calc = {
   aggregate(keys) {
     const p = Store.s.profile;
     const targets = Targets.current();
+    const consistency = this.sleepConsistency(keys);   // once for the whole period
     const acc = {
       days: keys.length, daysLogged: 0, workoutDays: 0, dietDays: 0, sleepDays: 0,
       volumeKg: 0, sets: 0, reps: 0, trainMin: 0, trainKcal: 0, load: 0, distanceKm: 0, avgRpe: [],
@@ -797,14 +1266,16 @@ const Calc = {
       const sl = this.sleepSummary(d);
       if (sl) {
         acc.sleepDays++;
-        acc.sleepH.push(sl.totalHours); acc.sleepEff.push(sl.efficiency);
-        acc.latency.push(sl.latency); acc.awakenings.push(sl.awakenings);
+        acc.sleepH.push(sl.totalHours);
+        if (sl.efficiencyKnown) acc.sleepEff.push(sl.efficiency);
+        if (sl.latency != null && d.sleep.latencyMin != null) acc.latency.push(sl.latency);
+        acc.awakenings.push(sl.awakenings);
         if (sl.quality) acc.sleepQual.push(sl.quality);
       }
       if (d.weightKg) acc.weights.push(d.weightKg);
       const ts = this.trainingScore(d, p); if (ts != null) acc.trainingScores.push(ts);
       const ns = this.nutritionScore(d, targets); if (ns != null) acc.nutritionScores.push(ns);
-      const rs = this.recoveryScore(d, keys, p, targets); if (rs != null) acc.recoveryScores.push(rs);
+      const rs = this.recoveryScore(d, keys, p, targets, consistency); if (rs != null) acc.recoveryScores.push(rs);
     });
     const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
     return {
@@ -825,13 +1296,21 @@ const Calc = {
       latency: avg(acc.latency), awakenings: avg(acc.awakenings),
       training: avg(acc.trainingScores), nutrition: avg(acc.nutritionScores),
       recovery: avg(acc.recoveryScores),
+      consistency,
       weight: avg(acc.weights),
       overall: avg([avg(acc.trainingScores), avg(acc.nutritionScores), avg(acc.recoveryScores)].filter(v => v != null))
     };
   },
 
-  /** Personal records across all logged days, keyed by exercise name */
+  /** Personal records across all logged days, keyed by exercise name.
+
+      Memoised against the store's version counter: this walks every set ever
+      logged, and it used to run on every single render. */
+  _prCache: null,
+  _prVersion: -1,
+
   personalRecords() {
+    if (this._prCache && this._prVersion === Store._version) return this._prCache;
     const prs = {};
     Object.entries(Store.s.days).forEach(([k, d]) => {
       ((d.workout && d.workout.entries) || []).forEach(en => {
@@ -848,6 +1327,8 @@ const Calc = {
         });
       });
     });
+    this._prCache = prs;
+    this._prVersion = Store._version;
     return prs;
   }
 };
@@ -965,7 +1446,16 @@ const Merge = {
       if (v === null || typeof v !== 'object') return v;
       if (Array.isArray(v)) return v.map(walk);
       const out = {};
-      Object.keys(v).sort().forEach(k => { out[k] = walk(v[k]); });
+      Object.keys(v).sort().forEach(k => {
+        const x = v[k];
+        // Match the compact wire format: a field that is absent and a field
+        // that is null mean the same thing, so they must compare equal.
+        if (x === null || x === undefined) return;
+        if (x === '' && k !== 'name') return;
+        if (Array.isArray(x) && x.length === 0) return;
+        if ((k === 'customFood' || k === 'recipe' || k === 'done') && x === false) return;
+        out[k] = walk(x);
+      });
       return out;
     };
     try { return JSON.stringify(walk(value)); } catch (e) { return ''; }

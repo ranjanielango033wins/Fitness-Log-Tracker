@@ -103,7 +103,8 @@ const Sleep = {
   },
 
   metricsHtml(m, t) {
-    const effCol = m.efficiency >= 85 ? 'var(--good)' : m.efficiency >= 75 ? 'var(--warn)' : 'var(--bad)';
+    const effCol = !m.efficiencyKnown ? 'var(--tx-3)'
+      : m.efficiency >= 85 ? 'var(--good)' : m.efficiency >= 75 ? 'var(--warn)' : 'var(--bad)';
     const mid = `${String(Math.floor(m.midSleep / 60)).padStart(2, '0')}:${String(Math.round(m.midSleep % 60)).padStart(2, '0')}`;
     return `<div class="card">
       <div class="card-head"><h3>Calculated</h3>
@@ -112,8 +113,9 @@ const Sleep = {
         <div class="stat"><div class="k">Time in bed</div><div class="v">${fmtHours(m.tibMin / 60)}</div></div>
         <div class="stat"><div class="k">Asleep</div><div class="v">${fmtHours(m.tstMin / 60)}</div>
           ${m.napMin ? `<div class="d dim">+${m.napMin}m naps</div>` : ''}</div>
-        <div class="stat"><div class="k">Efficiency</div><div class="v" style="color:${effCol}">${m.efficiency}<small>%</small></div>
-          <div class="d dim">target ≥ 85%</div></div>
+        <div class="stat"><div class="k">Efficiency</div>
+          <div class="v" style="color:${effCol}">${m.efficiencyKnown ? m.efficiency + '<small>%</small>' : '–'}</div>
+          <div class="d dim">${m.efficiencyKnown ? 'target ≥ 85%' : 'add time to fall asleep'}</div></div>
         <div class="stat"><div class="k">Mid-sleep</div><div class="v">${mid}</div>
           <div class="d dim">body-clock anchor</div></div>
         <div class="stat"><div class="k">vs target</div>
@@ -121,7 +123,7 @@ const Sleep = {
             ${m.totalHours >= t.sleepH ? '+' : '−'}${fmtHours(Math.abs(m.totalHours - t.sleepH))}</div></div>
         ${m.awakenings ? `<div class="stat"><div class="k">Wake-ups</div><div class="v">${m.awakenings}</div></div>` : ''}
       </div>
-      <div style="margin-top:12px">
+      ${m.efficiencyKnown ? `<div style="margin-top:12px">
         <div class="small muted" style="display:flex;justify-content:space-between;margin-bottom:5px">
           <span>Asleep</span><span>Falling asleep</span><span>Awake in bed</span></div>
         <div class="bar lg" style="display:flex">
@@ -129,7 +131,8 @@ const Sleep = {
           <i style="width:${m.tibMin ? m.latency / m.tibMin * 100 : 0}%;background:var(--warn)"></i>
           <i style="width:${m.tibMin ? m.awake / m.tibMin * 100 : 0}%;background:var(--bad)"></i>
         </div>
-      </div>
+      </div>` : `<p class="dim tiny" style="margin:12px 0 0">Fill in how long you took to fall asleep and how long you were
+        awake in the night, and FitLog can work out how much of your time in bed was actually spent asleep.</p>`}
     </div>`;
   },
 
@@ -166,7 +169,7 @@ const Sleep = {
   trendHtml(k, t, debt, consistency) {
     const keys = rangeKeys(addDays(k, -13), 14);
     const hours = keys.map(d => { const m = Calc.sleepSummary(Store.day(d)); return m ? m.totalHours : 0; });
-    const effs = keys.map(d => { const m = Calc.sleepSummary(Store.day(d)); return m ? m.efficiency : null; });
+    const effs = keys.map(d => { const m = Calc.sleepSummary(Store.day(d)); return m && m.efficiencyKnown ? m.efficiency : null; });
     if (!hours.some(h => h)) return '';
     return `<div class="card">
       <div class="card-head"><h3>Last 14 nights</h3></div>
@@ -180,7 +183,9 @@ const Sleep = {
         <div class="stat"><div class="k">Avg duration</div>
           <div class="v">${fmtHours(hours.filter(h => h).reduce((a, b) => a + b, 0) / Math.max(1, hours.filter(h => h).length))}</div></div>
         <div class="stat"><div class="k">Avg efficiency</div>
-          <div class="v">${fmtNum(effs.filter(e => e != null).reduce((a, b) => a + b, 0) / Math.max(1, effs.filter(e => e != null).length), 1)}<small>%</small></div></div>
+          <div class="v">${effs.some(e => e != null)
+            ? fmtNum(effs.filter(e => e != null).reduce((a, b) => a + b, 0) / effs.filter(e => e != null).length, 1) + '<small>%</small>'
+            : '<span class="dim">–</span>'}</div></div>
       </div>
       ${barChart(keys.map(shortDate), hours.map(h => ({ v: h, color: h >= t.sleepH ? CHART_COLORS.sleep : h ? CHART_COLORS.warn : CHART_COLORS.muted })), { target: t.sleepH, height: 130 })}
       <div class="chart-legend"><span><i style="background:var(--sleep)"></i>Hit target</span>
@@ -192,13 +197,16 @@ const Sleep = {
   adviceHtml(m, t, debt, consistency) {
     const out = [];
     if (m) {
-      if (m.efficiency < 80 && m.tibMin > 0) out.push(['warn', 'Low sleep efficiency',
+      // A night that reads as 14+ hours in bed is almost always am/pm confusion.
+      if (m.tibMin > 14 * 60) out.push(['warn', 'That looks like a very long night',
+        `${m.bed} to ${m.wake} works out at ${fmtHours(m.tibMin / 60)} in bed. If one of those is the wrong side of noon, correct it above — it is skewing your averages.`]);
+      if (m.efficiencyKnown && m.efficiency < 80 && m.tibMin > 0 && m.tibMin <= 14 * 60) out.push(['warn', 'Low sleep efficiency',
         `You spent ${fmtHours(m.tibMin / 60)} in bed but only ${fmtHours(m.tstMin / 60)} asleep (${m.efficiency}%). Below 85% usually means going to bed before you are actually sleepy — try shifting bedtime later by 20–30 minutes rather than earlier.`]);
       if (m.latency > 30) out.push(['warn', 'Long time to fall asleep',
         `${m.latency} minutes to drop off. Common culprits: caffeine inside 8 hours of bed, bright screens, or a warm room.`]);
       if (m.totalHours < t.sleepH - 1) out.push(['bad', 'Short night',
         `${fmtHours(t.sleepH - m.totalHours)} under target. Strength and recovery adaptations take the hit first.`]);
-      if (m.totalHours >= t.sleepH && m.efficiency >= 85) out.push(['good', 'Solid night',
+      if (m.totalHours >= t.sleepH && (!m.efficiencyKnown || m.efficiency >= 85)) out.push(['good', 'Solid night',
         'Duration and efficiency both on target — this is the night to repeat.']);
     }
     if (debt > 5) out.push(['bad', 'Sleep debt is building',
@@ -224,25 +232,37 @@ const Sleep = {
       return d.sleep;
     };
 
-    const bindVal = (sel, prop, num) => {
+    const bindVal = (sel, prop, kind) => {
       const e = $(sel, host); if (!e) return;
       e.addEventListener('change', () => {
         const s = get();
-        s[prop] = num ? (e.value === '' ? null : +e.value) : e.value;
+        if (!kind) { s[prop] = e.value; }
+        else {
+          const raw = e.value === '' ? null : +e.value;
+          const v = clamp(raw, kind);
+          s[prop] = v;
+          if (v != null && raw != null && v !== raw) {
+            e.value = v;
+            const l = LIMITS[kind];
+            toast(`Kept within ${l.min}–${l.max}`, 'warn');
+          }
+        }
         Store.save(); App.render();
       });
     };
     bindVal('#s-bed', 'bed');
     bindVal('#s-wake', 'wake');
-    bindVal('#s-lat', 'latencyMin', true);
-    bindVal('#s-awake', 'awakeMin', true);
-    bindVal('#s-wakes', 'awakenings', true);
+    bindVal('#s-lat', 'latencyMin', 'latency');
+    bindVal('#s-awake', 'awakeMin', 'awakeMin');
+    bindVal('#s-wakes', 'awakenings', 'awakenings');
     bindVal('#s-note', 'note');
 
     const nap = $('#s-nap', host);
     if (nap) nap.addEventListener('change', () => {
       const s = get();
-      s.naps = nap.value ? [{ min: +nap.value }] : [];
+      const v = clamp(nap.value, 'napMin');
+      s.naps = v ? [{ min: v }] : [];
+      if (v != null && v !== +nap.value) nap.value = v;
       Store.save(); App.render();
     });
 

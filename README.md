@@ -3,96 +3,112 @@
 A four-tab fitness log — **Overview, Fitness, Diet, Sleep** — that runs entirely in the browser.
 No account, no tracking. Host it on GitHub Pages and open it from any device.
 
-Your data lives in the browser's `localStorage`, so the app works offline and owes nothing to
-anyone. Optionally, turn on sync and your phone and laptop stay in step through a Cloudflare
-Worker you deploy once — still no account, nothing that expires, and a pairing code instead of a
-password. See [Sync across devices](#sync-across-devices).
+Your data lives in the browser's IndexedDB, so the app works offline and owes nothing to anyone.
+Optionally, turn on sync and your phone and laptop stay in step through a Cloudflare Worker you
+deploy once — still no account, nothing that expires, and a pairing code instead of a password.
 
 ---
 
 ## Deploy to GitHub Pages
 
-1. Create a new repository on GitHub (public or private — Pages works with both on paid plans;
-   public is free).
-2. Upload everything in this folder to the repository root — `index.html` must sit at the top level.
+1. Create a repository on GitHub.
+2. Upload the **contents** of this folder — `index.html` must sit at the repository root, not inside
+   a subfolder. Use **drag and drop** so the `css`, `js` and `icons` folders come with it; the
+   "choose your files" picker silently skips folders.
+3. If you used the web uploader, add `.nojekyll` by hand: **Add file → Create new file**, name it
+   `.nojekyll`, leave it empty, commit. The uploader skips dotfiles, and without it GitHub runs
+   Jekyll over your files.
+4. **Settings → Pages → Deploy from a branch → `main` → `/ (root)`.**
+5. Open `https://<your-username>.github.io/<your-repo>/`.
 
-   Via the web UI: **Add file → Upload files**, drag the whole contents in, commit.
+Or with git:
 
-   Via git:
-
-   ```bash
-   git init
-   git add .
-   git commit -m "FitLog"
-   git branch -M main
-   git remote add origin https://github.com/<your-username>/<your-repo>.git
-   git push -u origin main
-   ```
-
-3. In the repository go to **Settings → Pages**.
-4. Under *Build and deployment*, set **Source: Deploy from a branch**, **Branch: `main`**, folder **`/ (root)`**. Save.
-5. Wait about a minute, then open `https://<your-username>.github.io/<your-repo>/`.
-
-The `.nojekyll` file is already included so GitHub serves every file as-is.
+```bash
+git init && git add . && git commit -m "FitLog"
+git branch -M main
+git remote add origin https://github.com/<you>/<repo>.git
+git push -u origin main
+```
 
 ### Install it on your phone
 
-Open the Pages URL in Safari or Chrome and use **Add to Home Screen** / **Install app**.
-A service worker caches the whole app, so it opens and works with no connection.
+Open the Pages URL and use **Add to Home Screen** / **Install app**. A service worker caches the
+whole app, so it opens and works with no connection.
 
-After you push an update, bump `CACHE = 'fitlog-v2'` in `sw.js` to `fitlog-v3` (and so on) so
-installed copies pick the new version up.
+**Install it rather than leaving it as a tab.** iOS clears a site's stored data after seven days of
+not visiting it — unless the site is on the Home Screen. FitLog also asks the browser for persistent
+storage on first run, which covers most other cases.
+
+### Updating
+
+Bump `CACHE = 'fitlog-v5'` in `sw.js` to `v6` and push. Installed copies notice the new version and
+reload themselves — no hard refresh needed.
 
 ---
 
 ## The four tabs
 
 ### 1. Overview
-Pick **Day**, **Week** or **4 weeks**, and FitLog averages that period and the period immediately
-before it, then reports what moved.
+Pick **Day**, **Week**, **4 weeks**, **3 months** or **6 months**, and FitLog averages that period
+and the period immediately before it, then reports what moved.
 
 - **Three scores out of 100** — Training, Nutrition, Recovery — plus an overall, each with the change
   against the previous period.
 - **What changed** — plain-language findings: volume up or down, protein slipping, sleeping less,
-  working harder for the same output, training outrunning recovery.
-- **Daily score chart** across the period.
-- **Full breakdown** — every metric side by side with the previous period and a percentage change,
-  colour-coded by whether the direction is good. Metrics with no universally good direction
-  (average RPE, bodyweight on a maintenance plan) are shown neutral.
+  training outrunning recovery.
+- **Score chart** across the period, switching to weekly means past six weeks so it stays readable.
+- **Full breakdown** — every metric beside the previous period with a percentage change,
+  colour-coded by whether the direction is good. Metrics with no universally good direction are
+  shown neutral.
 - **Readiness** — acute:chronic workload ratio, recovery score, 14-day sleep debt.
+- **Browse every logged day** — a month-by-month calendar going back as far as the log does. Each
+  day shows which pillars were logged; tap one to jump to it.
 - **Personal records** and all-time totals.
 
-Use the ‹ › arrows to step back through earlier periods.
-
 ### 2. Fitness
-Header shows the date and session time, both editable (pencil icon) — you can also move a whole
-session to another date and log your bodyweight there.
+Editable date and session time. Three sections — **Upper Body**, **Lower Body**, **Cardio** —
+holding **231 exercises** across 19 muscle groups, including the commercial machines most gyms
+actually have: diverging and iso-lateral pulldowns and rows, converging chest press, abdominal
+crunch and triceps extension machines, pendulum and belt squats, assisted pull-up and dip.
 
-Three sections: **Upper Body**, **Lower Body**, **Cardio**. Each contains muscle groups
-(chest, back, shoulders, traps, biceps, triceps, forearms, core; quads, hamstrings, glutes, calves,
-adductors, olympic/power; running, cycling, machines, conditioning, mobility) with around
-170 exercises. You can add your own.
+One row per set: **Set · kg · Reps · kcal · ✓**
 
-Logging follows the pattern used by Strong and Hevy — one row per set:
+- Tap the set number to cycle **working → warm-up → drop set → to failure**.
+- The **kcal** column is calculated, not typed — see [Energy](#energy).
+- Cardio logs duration, distance, heart rate, intensity and **the calorie figure off the machine**;
+  enter it and FitLog uses it instead of its own estimate.
+- **Assisted machines** are modelled properly: on an assisted pull-up the stack carries part of you,
+  so it is subtracted from the load rather than added to it.
+- An **Energy breakdown** card shows where the session's calories went.
 
-| Set | kg | Reps | kcal | ✓ |
-|---|---|---|---|---|
+#### Your own exercises
 
-- Tap the set number to cycle **working → warm-up → drop set → to failure**. Warm-ups are excluded
-  from volume but still count toward energy — you did the work.
-- Tap ✓ to mark a set done; blank fields inherit the set above, and the rest timer starts.
-- The **kcal** column is calculated, not typed. See [Energy](#energy) below.
-- Adding an exercise pre-fills the sets from the last time you did it.
-- Cardio entries log duration, distance, average heart rate, intensity and **the calorie figure off the
-  machine** — enter it and FitLog uses it instead of its own estimate.
-- Each card shows volume, estimated 1RM, energy and your standing best; the exercise menu (pencil) has
-  history with an e1RM trend chart, duplicate, and notes.
-- When a session has more than one exercise, an **Energy breakdown** card shows where the calories went.
+Type a name the library does not have and FitLog offers to save it. It then appears in the picker
+forever after, so one movement builds one history instead of three spellings building three.
 
-#### Energy
+If what you typed is something FitLog already knows under another name — `INCLINED LEG PRESS`,
+`seated row`, `bb squat` — it quietly matches it instead of creating a duplicate.
 
-Standard MET tables give "weight lifting" a single number regardless of what you lifted, which makes a
-set of 20 kg curls cost the same as a set of 180 kg squats. FitLog costs a set from the work it
+### 3. Diet
+~250 foods with per-100 g macros, including Indian and Middle Eastern staples. Meal-by-meal log,
+custom foods, quick calorie entry, a recipe calculator that totals raw ingredients and splits them
+per serving, and water tracking against a target derived from bodyweight, training and climate.
+
+### 4. Sleep
+Bed and wake time drive everything: time in bed, total sleep time, efficiency, mid-sleep anchor,
+14-night debt, and a consistency score from the circular standard deviation of mid-sleep times.
+Add your own fields — caffeine, HRV, room temperature — and they flow into exports.
+
+Efficiency is only shown when you have recorded how long you took to fall asleep or how long you
+were awake. Without those it would arithmetically be 100%, which is an absence of data rather than a
+perfect night, so FitLog says so instead of scoring it.
+
+---
+
+## Energy
+
+Standard MET tables give "weight lifting" a single number regardless of what you lifted, which makes
+a set of 20 kg curls cost the same as a set of 180 kg squats. FitLog costs a set from the work it
 actually did:
 
 ```
@@ -100,44 +116,16 @@ work (J) = load × 9.81 × range of motion × reps × (1 + 0.35)
 kcal     = work ÷ 4184 ÷ 0.22
 ```
 
-The 0.35 is the lowering phase, which costs roughly a third of the lifting phase. The 0.22 is muscular
-efficiency — the share of chemical energy that becomes mechanical work. On top of that sits a small
-time term for bracing while the set runs (MET 3.5) and the rest between sets (MET 2.5).
+The 0.35 is the lowering phase, which costs roughly a third of the lifting phase. The 0.22 is
+muscular efficiency. On top sits a time term for bracing while the set runs (MET 3.5) and the rest
+between sets (MET 2.5).
 
-Bodyweight movements use a share of your body weight as the load — a push-up moves about 64% of you, a
-pull-up all of it — plus anything you hung off a belt. Holds and carries do no net mechanical work, so
-they are costed by time instead.
+Bodyweight movements use a share of your body weight as the load — a push-up moves about 64% of you,
+a pull-up all of it — plus anything on a belt, minus any machine assistance. Holds and carries do no
+net mechanical work, so they are costed by time.
 
-Range of motion comes from a table of typical values per movement. A tall lifter's bench stroke is
-longer than a short one's, so treat the result as a good estimate rather than a measurement — and note
-it doesn't try to capture the afterburn. What it does do is respond correctly to the things that
-actually drive the cost: how heavy, how many, how far.
-
-### 3. Diet
-- **Energy card** — calories eaten against target, calories burned in training, remaining, and net,
-  with macro rings and a fibre line.
-- **Water** — tap-to-add presets in ml (or fl oz), a visual glass grid and litres against target.
-- **Meals** — breakfast, lunch, dinner, snacks, pre/post workout. Search ~250 foods with per-100 g
-  macros, including Indian and Middle Eastern staples (roti, dal, biryani, paneer, shawarma, hummus,
-  manakish, kunafa, dates, karak). Pick a serving or type grams directly.
-- **Custom foods** from a label, and **quick calorie entry** for meals out.
-- **Recipe calculator** — add raw ingredients and their weights, and FitLog totals the calories and
-  macros, splits them per serving and per 100 g (with an optional cooked weight for water loss).
-  Save it and it becomes a loggable food.
-- **Copy a past day** for repeated meal prep, and a 7-day calorie and water chart.
-
-### 4. Sleep
-Enter **bed time** and **wake time** — everything else is calculated:
-
-- Time in bed, total sleep time, naps
-- **Sleep efficiency** = total sleep time ÷ time in bed (85% is the usual benchmark)
-- Mid-sleep point (your body-clock anchor)
-- 14-night **sleep debt** and a **consistency score** from the circular standard deviation of mid-sleep times
-- Latency, wake-ups, time awake in the night, rested rating
-- **Your own fields** — add anything: caffeine in mg, alcohol units, screen time, room temperature,
-  stress, resting heart rate, HRV. They appear on every night and flow into exports.
-
-Plus a 14-night chart and a "what this means" read of the numbers.
+Range of motion comes from a per-movement table. A tall lifter's bench stroke is longer than a short
+one's, so treat the result as a good estimate rather than a measurement.
 
 ---
 
@@ -145,110 +133,52 @@ Plus a 14-night chart and a "what this means" read of the numbers.
 
 Optional. Skip it and FitLog is a perfectly good local-only log.
 
-### One-time setup
+1. Deploy the worker — see [`worker/README-worker.md`](worker/README-worker.md). Fifteen minutes in
+   the Cloudflare dashboard, free tier.
+2. Put its URL in `js/config.js`. Every device picks it up from the site itself.
+3. On the device holding your history: **Settings → Sync → Turn on sync here**. On every other
+   device, point the camera at the QR code and tap the link.
 
-1. Deploy the worker — see [`worker/README-worker.md`](worker/README-worker.md). About fifteen
-   minutes in the Cloudflare dashboard, free tier, no card.
-2. Put its URL in `js/config.js`:
+**How conflicts resolve.** Merging happens per day, not per file. Log Monday on your laptop and
+Tuesday on your phone and both survive. Deletions carry a tombstone so removing a day removes it
+everywhere. The only real conflict is editing the same date on two devices while one is offline, and
+there the later edit wins. Every sync is pull → merge → push, so an offline edit is never lost.
 
-   ```js
-   window.FITLOG_CONFIG = {
-     syncEndpoint: 'https://fitlog-sync.your-name.workers.dev'
-   };
-   ```
-3. Push. Every device now picks the endpoint up from the site itself — you never type it again.
+**Bandwidth.** The payload is gzipped before it leaves the device — a year of logging goes from about
+680 KB to 120 KB. FitLog only writes when something actually changed, so an idle app costs nothing
+but reads.
 
-### Pairing devices
-
-On the device that already holds your history, open **Settings → Sync across devices → Turn on
-sync here**. It generates a 32-character pairing code and uploads your log.
-
-On every other device: open the camera, point it at the QR code shown in settings, and tap the
-link. FitLog opens already paired and pulls your history down. No sign-in, no password, no email.
-
-If a camera isn't practical, **Copy pairing link** or **Show code** and type it in under
-**Pair with another device**.
-
-### How it behaves
-
-- Syncs when you open the app, when you return to the tab, about every 90 seconds while it's
-  open, and a couple of seconds after you stop editing.
-- Offline, everything keeps working and catches up when you reconnect.
-- The status icon in the top bar shows where things stand; tap it to jump to the sync settings.
-
-### How conflicts are resolved
-
-Merging happens **per day, not per file**. Log Monday on your laptop and Tuesday on your phone and
-both survive — they're different keys. Deletions carry a tombstone so removing a day on one device
-removes it everywhere instead of being resurrected on the next sync. Custom foods, recipes and
-sleep fields merge by id.
-
-The only genuine conflict is editing *the same date* on two devices while one is offline, and
-there the later edit wins. Every sync is pull → merge → push, so an offline edit is never
-overwritten; it merges in on the next round.
-
-### Security, honestly
-
-The pairing code **is** the credential — anyone holding it can read and write your log. That's the
-trade that buys you no accounts and nothing that expires. It's 128 bits of randomness, so it isn't
-guessable, but keep it out of group chats and public screenshots. If you ever want to revoke it,
-**Delete cloud copy** erases the record and unpairs; start again with a fresh code.
-
-Cloudflare sees an opaque key and a blob. There's no user list, no email address, no account.
-
-### Limits
-
-A year of daily logging is roughly 250 KB, so the free tier isn't in sight: 100,000 reads and
-1,000 writes a day, and FitLog only writes when something actually changed.
-
-## Backup, restore and export
-
-Everything is under the **document icon** (reports) and **gear icon** (settings) in the top bar.
-
-- **Download backup** (JSON) — the complete log. Keep it anywhere.
-- **Restore from file** — on any device, in any browser. You choose **Merge** (keep what is there and
-  add the file's days) or **Replace everything**.
-- **PDF report** — cover page with headline numbers, profile and targets, the full period comparison,
-  a written reading of the period, personal records, and the complete daily, training, cardio,
-  sleep and nutrition logs.
-- **Excel workbook** — ten sheets: Summary, Comparison, Daily, Strength sets (one row per set),
-  Cardio, Nutrition items, Water, Sleep, Personal records, Recipes.
-- **CSV bundle** — the same data in plain text.
+**Security.** The pairing code is the credential; anyone holding it can read and write your log.
+128 bits of randomness, so it is not guessable, but keep it out of group chats. **Delete cloud copy**
+revokes it.
 
 ---
 
-## Units
+## Storage, and lasting for years
 
-Metric by default (kg, cm, km, ml/L). Switch to imperial (lb, in, mi, fl oz/cups) in settings —
-everything is stored in metric internally, so switching back and forth never changes your data.
+The log is kept in **IndexedDB**, not localStorage. That matters more than it sounds: localStorage
+is capped around 5 MB per site, and a day of full logging — workout, every meal, water, sleep — runs
+to roughly 4 KB. Two years overflows the cap, and the failure mode is the worst kind: the write
+throws, the newest day is lost, and nothing says so. IndexedDB has no such ceiling and its writes are
+transactional, so a half-written state is not one the app can ever read back.
 
----
+Measured on two years of dense synthetic data (730 days, every meal and every night):
 
-## The formulas
-
-| Quantity | Method |
+| | |
 |---|---|
-| Basal metabolic rate | Mifflin-St Jeor: `10×kg + 6.25×cm − 5×age + 5` (male) / `− 161` (female) |
-| Maintenance calories | BMR × activity factor (1.2 / 1.375 / 1.55 / 1.725 / 1.9) |
-| Goal calories | −20% cut, −10% slow cut, maintain, +8% lean gain, +15% mass gain |
-| Protein target | 1.8–2.2 g per kg depending on goal |
-| Water target | 35 ml/kg + 600 ml per training hour + 500 ml in a hot climate |
-| Cardio energy burn | The machine's own figure when you enter one; otherwise `MET × 3.5 × kg / 200` kcal per minute (Compendium of Physical Activities) |
-| Resistance energy burn | Per set: `load × 9.81 × range of motion × reps × 1.35 ÷ 4184 ÷ 0.22` kcal, plus a time-under-tension term at MET 3.5 and rest periods at MET 2.5 |
-| Estimated 1RM | Epley `w × (1 + r/30)` by default; Brzycki, Lombardi, O'Conner and Wathan also selectable |
-| Training volume | Σ weight × reps across working sets (warm-ups excluded) |
-| Training load | Session RPE method: duration in minutes × average RPE |
-| Acute:chronic ratio | 7-day load ÷ (28-day load ÷ 4); 0.8–1.3 is the usual sweet spot |
-| Sleep efficiency | total sleep time ÷ time in bed × 100 |
-| Total sleep time | time in bed − time to fall asleep − time awake in the night |
-| Sleep debt | Σ (target hours − actual) over the last 14 nights |
-| Consistency | circular standard deviation of mid-sleep times, mapped to 0–100 |
+| Stored size | 2.8 MB |
+| A single edit | 0.15 ms |
+| Any tab rendering | under 25 ms |
+| Six-month comparison | under 30 ms |
+| Cold start | under 1 s |
+| Reload integrity | byte-identical |
 
-Scores combine those into 0–100: **Training** from volume, sets, duration and muscle-group coverage;
-**Nutrition** from calorie accuracy, protein, water and fibre; **Recovery** from sleep duration,
-efficiency, subjective rating, consistency and wake-ups.
+localStorage remains as a fallback for browsers that block IndexedDB, and the first run on this
+version moves any existing localStorage copy across automatically.
 
-These are estimates to guide training decisions, not medical advice.
+**Settings → Check my data** walks everything stored and reports what does not add up — unknown
+exercises, out-of-range values, calories left in a note, implausible nights — and repairs what can be
+repaired without guessing. It never deletes a workout, a meal or a night.
 
 ---
 
@@ -258,28 +188,23 @@ These are estimates to guide training decisions, not medical advice.
 index.html                  app shell
 css/styles.css              design system, dark and light
 js/config.js                your sync endpoint — the only file you edit
-js/data-exercises.js        ~170 exercises with muscle groups, equipment and MET values
-js/data-foods.js            ~250 foods with per-100 g macros and serving sizes
-js/store.js                 state, persistence, unit conversion, calculations, merge engine
+js/data-exercises.js        231 exercises with muscle groups, equipment, MET and range of motion
+js/data-foods.js            ~250 foods with per-100 g macros
+js/store.js                 state, persistence, migration, units, calculations, merge engine
 js/ui.js                    icons, toasts, sheets, SVG charts
-js/sync.js                  pairing, pull/merge/push, status
-js/tab-overview.js          period comparison engine
-js/tab-fitness.js           training log
-js/tab-diet.js              nutrition, water, recipe calculator
-js/tab-sleep.js             sleep log and derived metrics
+js/health.js                the data health check and repair
+js/history.js               the month-by-month calendar browser
+js/sync.js                  pairing, compression, pull/merge/push
+js/tab-*.js                 the four tabs
 js/settings.js              profile, targets, sync, backup and restore
 js/exports.js               PDF, Excel and CSV reports
 js/vendor/                  jsPDF, jsPDF-AutoTable, SheetJS, qrcode-generator
-sw.js                       offline cache
+sw.js                       offline cache and self-update
 manifest.webmanifest        installable app metadata
 
 worker/worker.js            the Cloudflare Worker — deploy this for sync
 worker/README-worker.md     step-by-step deployment
-worker/wrangler.toml        only needed for the CLI route
 ```
-
-Everything under `worker/` is for Cloudflare, not for the website. Uploading it to GitHub is
-harmless — it just sits there — but it is never served to the browser.
 
 No build step, no npm install, no framework. Edit a file, push, done.
 
@@ -287,9 +212,22 @@ No build step, no npm install, no framework. Edit a file, push, done.
 
 `1`–`4` switch tabs · `T` jumps to today · `Alt + ←/→` steps a day · `Esc` closes a sheet.
 
-## Editing the data
+## The formulas
 
-Adding an exercise: append to the right group in `js/data-exercises.js`.
-Adding a food permanently: append a pipe-delimited line to `js/data-foods.js` —
-`name|category|kcal|protein|carbs|fat|fibre|serving:grams;serving:grams`, all per 100 g.
-(For one-off foods just use **New custom food** in the app.)
+| Quantity | Method |
+|---|---|
+| Basal metabolic rate | Mifflin-St Jeor |
+| Maintenance calories | BMR × activity factor (1.2–1.9) |
+| Protein target | 1.8–2.2 g per kg depending on goal |
+| Water target | 35 ml/kg + 600 ml per training hour + 500 ml in a hot climate |
+| Cardio energy | The machine's figure when entered; otherwise `MET × 3.5 × kg / 200` per minute |
+| Resistance energy | Mechanical work ÷ 4184 ÷ 0.22, plus tension and rest terms |
+| Estimated 1RM | Epley by default; Brzycki, Lombardi, O'Conner and Wathan also selectable |
+| Training volume | Σ weight × reps across working sets |
+| Training load | Session RPE: duration × intensity |
+| Acute:chronic ratio | 7-day load ÷ (28-day load ÷ 4); 0.8–1.3 is the usual sweet spot |
+| Sleep efficiency | total sleep time ÷ time in bed |
+| Sleep debt | Σ (target − actual) over 14 nights |
+| Consistency | circular standard deviation of mid-sleep times, mapped to 0–100 |
+
+Estimates to guide training decisions, not medical advice.

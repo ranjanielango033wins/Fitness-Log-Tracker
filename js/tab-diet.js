@@ -140,7 +140,9 @@ const Diet = {
     $('#ws', s.sheet).onclick = () => {
       const v = +$('#wv', s.sheet).value;
       if (!v) return;
-      this.addWater(Math.round(Units.vIn(v)));
+      const ml = clamp(Math.round(Units.vIn(v)), 'waterMl');
+      if (!ml) return toast('Enter an amount between 1 and 5000 ml', 'warn');
+      this.addWater(ml);
       s.close();
     };
   },
@@ -319,7 +321,7 @@ const Diet = {
       };
       $('#ps-s', s.sheet).onchange = e => { servIdx = +e.target.value; grams = qty * food.servings[servIdx].g; draw(); };
       $('#ps-g', s.sheet).oninput = e => {
-        grams = +e.target.value || 0; qty = round(grams / food.servings[servIdx].g, 2);
+        grams = clamp(e.target.value, 'grams') || 0; qty = round(grams / food.servings[servIdx].g, 2);
         $('#ps-q', s.sheet).value = qty; redrawStats();
       };
     };
@@ -405,8 +407,10 @@ const Diet = {
     $('#cf-s', s.sheet).onclick = () => {
       const name = $('#cf-n', s.sheet).value.trim();
       if (!name) return toast('Give the food a name', 'warn');
-      const P = +$('#cf-p', s.sheet).value || 0, C = +$('#cf-cb', s.sheet).value || 0, F = +$('#cf-f', s.sheet).value || 0;
-      const kcal = +$('#cf-k', s.sheet).value || round(P * 4 + C * 4 + F * 9);
+      const P = clamp($('#cf-p', s.sheet).value, 'grams') || 0,
+            C = clamp($('#cf-cb', s.sheet).value, 'grams') || 0,
+            F = clamp($('#cf-f', s.sheet).value, 'grams') || 0;
+      const kcal = clamp($('#cf-k', s.sheet).value, 'kcal') || round(P * 4 + C * 4 + F * 9);
       const sv = +$('#cf-sv', s.sheet).value;
       const food = {
         id: 'c' + uid(), name, cat: $('#cf-c', s.sheet).value,
@@ -435,13 +439,13 @@ const Diet = {
       foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="q-s">Add</button>`
     });
     $('#q-s', s.sheet).onclick = () => {
-      const kcal = +$('#q-k', s.sheet).value;
+      const kcal = clamp($('#q-k', s.sheet).value, 'kcal');
       if (!kcal) return toast('Enter the calories', 'warn');
       const day = Store.day(App.date, true);
       day.diet.meals[slotId].push({
         id: uid(), foodId: null, name: $('#q-n', s.sheet).value.trim() || 'Quick entry',
-        grams: 0, kcal, p: +$('#q-p', s.sheet).value || 0, c: +$('#q-c', s.sheet).value || 0,
-        f: +$('#q-f', s.sheet).value || 0, fib: 0, serving: 'quick entry', t: nowTime()
+        grams: 0, kcal, p: clamp($('#q-p', s.sheet).value, 'grams') || 0, c: clamp($('#q-c', s.sheet).value, 'grams') || 0,
+        f: clamp($('#q-f', s.sheet).value, 'grams') || 0, fib: 0, serving: 'quick entry', t: nowTime()
       });
       Store.save(); s.close(); App.render();
     };
@@ -509,10 +513,10 @@ const Diet = {
         </div>`;
 
       $('#rc-n', rc).oninput = e => { recipe.name = e.target.value; };
-      $('#rc-sv', rc).onchange = e => { recipe.servings = Math.max(1, +e.target.value || 1); draw(); };
-      $('#rc-cw', rc).onchange = e => { recipe.cookedGrams = +e.target.value || null; draw(); };
+      $('#rc-sv', rc).onchange = e => { recipe.servings = clampTo(e.target.value, 'servings', 1); draw(); };
+      $('#rc-cw', rc).onchange = e => { recipe.cookedGrams = clamp(e.target.value, 'grams') || null; draw(); };
       $$('[data-ig]', rc).forEach(inp => inp.onchange = () => {
-        recipe.ingredients[+inp.dataset.ig].grams = +inp.value || 0; draw();
+        recipe.ingredients[+inp.dataset.ig].grams = clamp(inp.value, 'grams') || 0; draw();
       });
       $$('[data-irm]', rc).forEach(b => b.onclick = () => { recipe.ingredients.splice(+b.dataset.irm, 1); draw(); });
       $('#rc-add', rc).onclick = () => this.pickIngredient(food => {

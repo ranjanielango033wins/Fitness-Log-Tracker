@@ -181,7 +181,10 @@ function lineChart(labels, series, opts) {
       g += `<path d="${d} L ${pts[pts.length - 1][0]} ${H - pad.b} L ${pts[0][0]} ${H - pad.b} Z" fill="${s.color}" opacity=".12"/>`;
     }
     g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
-    pts.forEach(p => { g += `<circle cx="${round(p[0], 1)}" cy="${round(p[1], 1)}" r="2.6" fill="${s.color}"/>`; });
+    // Dots help at a few dozen points and turn into a smear at a few hundred.
+    if (opts.markers !== false && pts.length <= 40) {
+      pts.forEach(p => { g += `<circle cx="${round(p[0], 1)}" cy="${round(p[1], 1)}" r="2.6" fill="${s.color}"/>`; });
+    }
   });
   // x labels (first, middle, last)
   const idxs = labels.length <= 8 ? labels.map((_, i) => i) : [0, Math.floor(labels.length / 2), labels.length - 1];

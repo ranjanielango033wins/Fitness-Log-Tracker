@@ -519,6 +519,34 @@ label.fld > span { display: block; font-size: 12px; font-weight: 600; color: var
 
 .hr { height: 1px; background: var(--line-soft); margin: 14px 0; border: 0; }
 
+/* ---------- history calendar ---------- */
+.cal-head, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-head { margin-bottom: 5px; }
+.cal-head div {
+  text-align: center; font-size: 10px; font-weight: 800; letter-spacing: .06em;
+  color: var(--tx-3); text-transform: uppercase;
+}
+.cal-cell {
+  aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--line-soft);
+  background: var(--card-2); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px; position: relative;
+  font-variant-numeric: tabular-nums;
+}
+.cal-cell.empty-cell { border: 0; background: none; }
+.cal-cell[data-day] { cursor: pointer; }
+.cal-cell[data-day]:hover { border-color: var(--acc); }
+.cal-cell.has { background: var(--bg-elev); border-color: var(--line); }
+.cal-cell.today { outline: 2px solid var(--acc); outline-offset: -2px; }
+.cal-cell.future { opacity: .3; }
+.cal-n { font-size: 12px; font-weight: 600; color: var(--tx-2); line-height: 1; }
+.cal-cell.has .cal-n { color: var(--tx); font-weight: 700; }
+.cal-marks { display: flex; gap: 2px; height: 5px; align-items: center; }
+.cal-marks .mk { width: 5px; height: 5px; border-radius: 50%; display: block; }
+.mk-t { background: var(--train); }
+.mk-d { background: var(--diet); }
+.mk-s { background: var(--sleep); }
+.pill.dim { color: var(--tx-3); }
+
 /* ---------- sync ---------- */
 .sync-badge.good { color: var(--good); }
 .sync-badge.warn { color: var(--warn); }

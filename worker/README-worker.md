@@ -1,109 +1,152 @@
-# Deploying the FitLog sync worker
+# The sync worker
 
-Fifteen minutes, once. Free tier covers this several thousand times over —
-100,000 requests a day, and a heavy logging day uses about fifty.
+This is optional. Skip the whole folder and FitLog is a complete local-only log
+with manual backup and restore.
 
-You need a Cloudflare account (free, no card required) at
-[dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up).
+Deploy it and your devices stay in step: no account, no password, nothing that
+expires. The pairing code is the credential.
+
+Free tier is enough — 100,000 reads and 1,000 writes a day, and FitLog only
+writes when something actually changed.
 
 ---
 
-## Option A — the dashboard (no tools to install)
+## The short version
 
-### 1. Create the KV namespace
+1. Cloudflare dashboard → **Storage & Databases → KV → Create** a namespace called `FITLOG`.
+2. **Compute → Workers → Create** → start from Hello World → **Deploy**.
+3. Open the worker → **Edit code**, select everything in `worker.js`, paste in the
+   contents of `worker.js` from this folder → **Deploy**.
+4. Worker → **Settings → Bindings → Add → KV namespace**. Variable name `FITLOG` (exactly),
+   namespace the one you made. **Deploy** again.
+5. Click **Visit**. You should see *FitLog sync worker is running*.
+6. Copy that URL into `js/config.js` in the site, and push the site.
 
-In the Cloudflare dashboard: **Storage & Databases → KV → Create a namespace**.
+---
 
-Name it `fitlog` and create it. This is where your log will live.
+## Step by step
 
-### 2. Create the worker
+### 1. A KV namespace to hold the data
 
-**Compute (Workers) → Create → Start with Hello World! → Get started.**
+Cloudflare dashboard → **Storage & Databases → KV → Create a namespace**.
+Call it `FITLOG`. That is all; there is nothing to configure inside it.
 
-Name it `fitlog-sync` and deploy it. Cloudflare gives you a throwaway starter worker;
-you are about to replace its code.
+### 2. A worker to serve it
 
-### 3. Paste in the real code
+**Compute (Workers) → Workers & Pages → Create → Start with Hello World → Deploy.**
 
-On the worker's page: **Edit code** (or **</> Edit code** in the Deploy pane).
+Cloudflare names it for you — something like `old-dawn-3db0`. Workers cannot be
+renamed after creation and the name only shows up in the URL, so either live with
+it or delete it and create one with the name you want.
 
-Delete everything in the editor, paste the entire contents of `worker.js` from this
-folder, then **Deploy**.
+### 3. Replace the code
+
+Open the worker → **Edit code**. The editor opens on `worker.js` with the Hello
+World handler in it.
+
+**Select all of it and paste over it.** Do not drag `worker.js` from this folder
+into the file list — that adds a *second* file alongside the entry point, and the
+worker keeps running the original. If you see two files in the sidebar, delete the
+one you added and paste into the first instead.
+
+Then press the blue **Deploy** button at the top right. `Ctrl+S` saves to the
+editor's scratch copy, not to Cloudflare, and on some browsers it fails outright
+with *No file system handle registered* — ignore it and use **Deploy**.
+
+If the tab title still shows a dot, the editor has unsaved changes and has not
+deployed what you are looking at. Reload the page and check the code is the
+pasted version before deploying again.
 
 ### 4. Bind the namespace
 
-Back on the worker: **Settings → Bindings → Add → KV namespace.**
+The worker cannot see KV until you tell it to.
 
-- **Variable name:** `FITLOG` — exactly this, in capitals. The code looks for this name.
-- **KV namespace:** the `fitlog` one you made in step 1.
+**Settings → Bindings → Add → KV namespace.**
 
-**Deploy** again so the binding takes effect.
+| | |
+|---|---|
+| Variable name | `FITLOG` |
+| KV namespace | the one from step 1 |
+
+The variable name must be exactly `FITLOG` — that is the name the code looks for.
+Save, then **Deploy** once more so the binding reaches the live version.
 
 ### 5. Check it
 
-Your worker's URL is shown on its overview page and looks like:
+Click **Visit** next to Deploy. You should see:
 
-```
-https://fitlog-sync.<your-subdomain>.workers.dev
-```
+> FitLog sync worker is running.
+> This endpoint stores nothing you can read without a pairing code.
 
-Open it in a browser. You should see *"FitLog sync worker is running."*
+Still "Hello World"? The paste did not deploy. Go back to step 3.
 
-If you instead see an error mentioning `kv_not_bound`, the binding in step 4 did not
-save — the variable name has to be `FITLOG`.
+### 6. Tell the app where it is
 
----
-
-## Option B — the wrangler CLI
-
-```bash
-cd worker
-npx wrangler kv namespace create FITLOG     # prints an id
-# paste that id into wrangler.toml
-npx wrangler deploy
-```
-
----
-
-## 6. Point FitLog at it
-
-Open `js/config.js` in the site folder and put your worker URL in:
+Copy the worker URL — `https://<name>.<your-subdomain>.workers.dev` — into
+`js/config.js`:
 
 ```js
 window.FITLOG_CONFIG = {
-  syncEndpoint: 'https://fitlog-sync.your-subdomain.workers.dev'
+  syncEndpoint: 'https://your-worker.your-subdomain.workers.dev'
 };
 ```
 
-Push that to GitHub. Because the endpoint ships with the site, **every device picks it
-up automatically** — you never type it again. If you leave it blank, FitLog still runs
-perfectly as a local-only log, and you can paste an endpoint by hand in Settings → Sync.
+Push the site. Every device picks the endpoint up from the site itself, so this is
+the only place it is ever typed.
+
+### 7. Pair your devices
+
+On the device that already holds your history: **Settings → Sync → Turn on sync
+here**. It generates a pairing code and uploads your log.
+
+On every other device: point the camera at the QR code and open the link, or open
+the site and paste the code into **Settings → Sync → Use an existing code**.
+
+Any number of devices can share one code. They are peers — no master, no slave.
+Each one pulls, merges and pushes, so whichever device you log on, the others see
+it next time they sync.
 
 ---
 
-## What gets stored
+## With wrangler instead
 
-One JSON record per pairing code, under the key `log:<code>`:
-
-```json
-{ "rev": 14, "updatedAt": "2026-09-29T06:12:44.101Z", "data": { "...your log..." } }
+```bash
+npm install -g wrangler
+wrangler login
+cd worker
+wrangler kv namespace create FITLOG       # copy the id it prints
+# paste that id into wrangler.toml
+wrangler deploy
 ```
 
-Nobody can read it without the 32-character code, and the code never leaves your
-devices. There is no user list, no email address and no account — Cloudflare sees an
-opaque key and a blob.
+`wrangler.toml` in this folder has everything but the namespace id.
 
-To erase the cloud copy entirely, use **Settings → Sync → Delete cloud copy** in the
-app, or delete the key from the KV namespace in the dashboard. Your devices keep their
-local data either way.
+---
 
-## A note on KV consistency
+## What it does and does not do
 
-Cloudflare KV is eventually consistent: a write can take up to a minute to be visible
-from a different part of the world. In practice you are one person switching between a
-phone and a laptop, so this never shows up.
+```
+GET    /v1/log/<code>   -> { rev, updatedAt, data }
+PUT    /v1/log/<code>   <- { rev, days, enc, payload }    409 if rev is stale
+DELETE /v1/log/<code>   -> { ok: true }
+GET    /                -> a health page
+```
 
-If it ever did — you write on your phone and open your laptop seconds later — the
-laptop might briefly see the previous state. It heals itself: FitLog merges day by day
-using timestamps, so the phone's next sync restores anything the laptop's write did not
-know about. Nothing is lost, it just takes one extra round trip.
+- **The code is the credential.** 128 bits of randomness, so it is not guessable,
+  but anyone holding it can read and write your log. Keep it out of group chats.
+  **Settings → Delete cloud copy** erases the stored value and the code with it.
+- **Writes are checked.** A client sends the revision it last read; if the stored
+  copy has moved on, the write is refused with 409 and the client merges and
+  retries. Nothing is overwritten blindly.
+- **An empty push cannot wipe your devices.** The client states how many days it
+  is sending and the worker refuses a payload that claims fewer days than it
+  holds without a matching revision.
+- **It stores one opaque blob per code.** Gzipped on the device before it is sent.
+  The worker does not parse your log, and there is no endpoint that lists codes.
+- **20 MB ceiling** per code — roughly a decade of daily logging.
+
+## Cost
+
+Reads: a device syncing every few minutes all day is a few hundred reads.
+Writes: one per actual change. A heavy day of logging is perhaps thirty.
+Both sit far inside the free tier, and KV storage of a few megabytes is free.

@@ -15,8 +15,8 @@ const App = {
   prCache: {},
   clock: null,
 
-  init() {
-    Store.load();
+  async init() {
+    await Store.load();
     this.applyTheme();
     this.paintChrome();
 
@@ -53,7 +53,10 @@ const App = {
       if (this.date !== todayKey() && this.wasToday) { this.date = todayKey(); this.render(); }
     }, 60000);
 
-    window.addEventListener('beforeunload', () => Store.save());
+    // Writes are debounced, so make sure nothing is in flight when we lose the page.
+    window.addEventListener('beforeunload', () => Store.flush());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) Store.flush(); });
+    window.addEventListener('pagehide', () => Store.flush());
 
     const pairingFromLink = !!Sync.parseCode(location.hash);
     if (!Store.loggedDays().length && !Store.s.profile.name && !pairingFromLink) {
@@ -62,10 +65,55 @@ const App = {
 
     this.render();
     Sync.init();
+    this.reportRepairs();
+    this.registerWorker();
+  },
 
-    if ('serviceWorker' in navigator && location.protocol.startsWith('http') && !window.FITLOG_NO_SW) {
-      navigator.serviceWorker.register('sw.js').catch(() => { /* offline cache is optional */ });
-    }
+  /** Tell the user what the migration changed, rather than doing it silently. */
+  reportRepairs() {
+    const log = Store.repairLog || [];
+    if (!log.length) return;
+    Store.repairLog = [];
+    setTimeout(() => {
+      const groups = {};
+      log.forEach(line => {
+        const kind = /matched to/.test(line) ? 'Exercise names merged'
+          : /read .* kcal/.test(line) ? 'Calories recovered from notes'
+          : /Saved ".*" as one of your own/.test(line) ? 'Saved as your own exercises'
+          : 'Other repairs';
+        (groups[kind] = groups[kind] || []).push(line);
+      });
+      openSheet({
+        title: 'Your log was tidied up',
+        body: `<p class="muted small">Opening this version checked every stored day and fixed what it could.
+          Nothing was deleted — names were merged and stray values corrected.</p>
+          ${Object.entries(groups).map(([kind, lines]) => `
+            <div class="section-title">${esc(kind)} <span class="dim">(${lines.length})</span></div>
+            <div class="card flush"><div class="list">
+              ${lines.slice(0, 40).map(l => `<div class="row"><div class="s">${esc(l)}</div></div>`).join('')}
+              ${lines.length > 40 ? `<div class="row"><div class="s dim">…and ${lines.length - 40} more</div></div>` : ''}
+            </div></div>`).join('')}`,
+        foot: `<button class="btn primary" data-close>Got it</button>`
+      });
+    }, 700);
+  },
+
+  /** Pick up a new deployment without the user hunting for a hard refresh. */
+  registerWorker() {
+    if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http') || window.FITLOG_NO_SW) return;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      Store.flush();
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // check for a new build when the app is reopened
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reg.update().catch(() => {});
+      });
+    }).catch(() => { /* offline cache is optional */ });
   },
 
   get wasToday() { return true; },
