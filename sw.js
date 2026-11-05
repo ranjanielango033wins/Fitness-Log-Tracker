@@ -4,7 +4,7 @@
    control and reloads itself, so a deployment reaches installed copies without
    anyone hunting for a hard refresh. */
 
-const CACHE = 'fitlog-v5';
+const CACHE = 'fitlog-v6';
 const SHELL = [
   './',
   './index.html',
@@ -28,6 +28,7 @@ const SHELL = [
   './js/vendor/jspdf.plugin.autotable.min.js',
   './js/vendor/xlsx.full.min.js',
   './js/vendor/qrcode.js',
+  './js/vendor/jsqr.min.js',
   './manifest.webmanifest',
   './icons/icon.svg'
 ];

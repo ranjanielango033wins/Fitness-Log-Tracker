@@ -266,7 +266,8 @@ function defaultState() {
       rev: 0,              // last revision this device saw on the server
       lastSync: null,
       lastError: null,
-      deviceId: null
+      deviceId: null,
+      noGzip: false        // set if the worker turns out to predate compressed pushes
     },
     meta: { created: new Date().toISOString(), lastBackup: null }
   };

@@ -41,7 +41,7 @@ storage on first run, which covers most other cases.
 
 ### Updating
 
-Bump `CACHE = 'fitlog-v5'` in `sw.js` to `v6` and push. Installed copies notice the new version and
+Bump `CACHE = 'fitlog-v6'` in `sw.js` to `v7` and push. Installed copies notice the new version and
 reload themselves — no hard refresh needed.
 
 ---
@@ -137,7 +137,14 @@ Optional. Skip it and FitLog is a perfectly good local-only log.
    the Cloudflare dashboard, free tier.
 2. Put its URL in `js/config.js`. Every device picks it up from the site itself.
 3. On the device holding your history: **Settings → Sync → Turn on sync here**. On every other
-   device, point the camera at the QR code and tap the link.
+   device: **Settings → Sync → Scan a QR code**, and hold it up to the first device's screen.
+   The phone's own camera app works too — the QR is a link that opens FitLog already paired —
+   and the code can always be typed in by hand.
+
+**The scanner** uses the browser's built-in barcode reader where there is one (Chrome, Android) and
+falls back to a decoder bundled with the app (Safari, everything else). Either way the camera image
+is read on the device and thrown away; nothing is uploaded. It needs an https address, which
+GitHub Pages gives you.
 
 **How conflicts resolve.** Merging happens per day, not per file. Log Monday on your laptop and
 Tuesday on your phone and both survive. Deletions carry a tombstone so removing a day removes it
@@ -146,7 +153,14 @@ there the later edit wins. Every sync is pull → merge → push, so an offline 
 
 **Bandwidth.** The payload is gzipped before it leaves the device — a year of logging goes from about
 680 KB to 120 KB. FitLog only writes when something actually changed, so an idle app costs nothing
-but reads.
+but reads. A worker still running an older `worker.js` does not understand the compressed shape; the
+app notices, sends it uncompressed instead so you are never stuck, and says in Settings that the
+worker is worth updating.
+
+**An empty log never overwrites a full one.** A device that deleted days carries tombstones and says
+so; a device that simply failed to read the stored copy carries neither, and the worker hands it the
+live copy back to merge rather than accepting the wipe. Clearing the cloud copy on purpose is
+**Delete cloud copy**, which is a different request entirely.
 
 **Security.** The pairing code is the credential; anyone holding it can read and write your log.
 128 bits of randomness, so it is not guessable, but keep it out of group chats. **Delete cloud copy**
@@ -198,7 +212,7 @@ js/sync.js                  pairing, compression, pull/merge/push
 js/tab-*.js                 the four tabs
 js/settings.js              profile, targets, sync, backup and restore
 js/exports.js               PDF, Excel and CSV reports
-js/vendor/                  jsPDF, jsPDF-AutoTable, SheetJS, qrcode-generator
+js/vendor/                  jsPDF, jsPDF-AutoTable, SheetJS, qrcode-generator, jsQR
 sw.js                       offline cache and self-update
 manifest.webmanifest        installable app metadata
 

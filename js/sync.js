@@ -68,7 +68,10 @@ const Sync = {
      it down by roughly a factor of ten. Browsers without CompressionStream
      simply send plain JSON, and the worker accepts either. */
 
-  get canCompress() { return typeof CompressionStream === 'function'; },
+  get canCompress() {
+    if (!Store.s.sync || Store.s.sync.noGzip) return false;     // worker said it cannot read it
+    return typeof CompressionStream === 'function';
+  },
 
   async gzipB64(text) {
     const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
@@ -201,6 +204,13 @@ const Sync = {
     if (this.inFlight) { this.pendingPush = true; return false; }
     if (!navigator.onLine) { this.set('offline'); return false; }
 
+    // A hand-pressed sync re-tests compression, so updating the worker takes effect
+    // without anyone having to know that a flag was ever set.
+    if (opts.reason === 'manual' && Store.s.sync.noGzip) {
+      Store.s.sync.noGzip = false;
+      Store.save({ fromSync: true });
+    }
+
     this.inFlight = true;
     this.set('syncing');
 
@@ -229,7 +239,7 @@ const Sync = {
     // Cache-bust with a query param rather than a Cache-Control header: a custom
     // header would turn this into a CORS preflight for no benefit.
     const res = await fetch(`${url}?t=${Date.now()}`, { method: 'GET', cache: 'no-store' });
-    if (!res.ok) throw new Error(this.httpMessage(res.status));
+    if (!res.ok) throw new Error(await this.httpMessage(res));
     const remote = await res.json();
     const remoteData = await this.readRemote(remote);
 
@@ -256,28 +266,25 @@ const Sync = {
       return true;
     }
 
-    const body = { rev: remote.rev, days: Object.keys(canonical.days || {}).length };
-    const plain = JSON.stringify(canonical, compactReplacer);
-    if (this.canCompress) {
-      try {
-        body.enc = 'gzip';
-        body.payload = await this.gzipB64(plain);
-      } catch (e) {
-        delete body.enc; delete body.payload;
-        body.data = canonical;
+    const dayCount = Object.keys(canonical.days || {}).length;
+    let put = await this.sendPut(url, remote.rev, dayCount, canonical, this.canCompress);
+
+    /* A worker still running an older worker.js knows only the plain `{rev, data}`
+       shape and answers 400 to a compressed push. Rather than leave the app stuck,
+       send it again uncompressed, remember that for this endpoint, and say so once. */
+    if (put.status === 400 && this.canCompress) {
+      const retry = await this.sendPut(url, remote.rev, dayCount, canonical, false);
+      if (retry.ok || retry.status === 409) {
+        Store.s.sync.noGzip = true;
+        Store.save({ fromSync: true });
+        toast('Synced, but your worker is an old version — redeploy worker.js to halve the data it uses', 'warn');
       }
-    } else {
-      body.data = canonical;
+      put = retry;
     }
 
-    const put = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: body.payload ? JSON.stringify(body) : JSON.stringify(body, compactReplacer)
-    });
-
-    if (put.status === 409) return this.roundTrip(attempt + 1);    if (put.status === 413) throw new Error('Log too large for the sync store');
-    if (!put.ok) throw new Error(this.httpMessage(put.status));
+    if (put.status === 409) return this.roundTrip(attempt + 1);
+    if (put.status === 413) throw new Error('Log too large for the sync store');
+    if (!put.ok) throw new Error(await this.httpMessage(put));
 
     const done = await put.json();
     Store.s.sync.rev = done.rev;
@@ -286,11 +293,56 @@ const Sync = {
     return true;
   },
 
-  httpMessage(status) {
-    if (status === 404) return 'Endpoint not found — check the worker URL';
-    if (status === 400) return 'The worker rejected the request';
-    if (status === 500) return 'Worker error — is the KV namespace bound as FITLOG?';
-    return 'HTTP ' + status;
+  /** One PUT, in whichever shape the worker can read. */
+  async sendPut(url, rev, dayCount, canonical, compress) {
+    // `dels` lets the worker tell a deliberate wipe (which carries tombstones)
+    // from a device that simply failed to read the stored copy.
+    const dels = Object.keys(((canonical._del || {}).days) || {}).length;
+    const body = { rev: rev, days: dayCount, dels: dels };
+    if (compress) {
+      try {
+        body.enc = 'gzip';
+        body.payload = await this.gzipB64(JSON.stringify(canonical, compactReplacer));
+      } catch (e) {
+        delete body.enc; delete body.payload;
+        body.data = canonical;
+      }
+    } else {
+      body.data = canonical;
+    }
+    return fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: body.payload ? JSON.stringify(body) : JSON.stringify(body, compactReplacer)
+    });
+  },
+
+  /** Say what actually went wrong, including the worker's own words. */
+  async httpMessage(res) {
+    const status = res.status;
+    let detail = '';
+    try {
+      const txt = (await res.text()).slice(0, 400);
+      if (txt) {
+        try {
+          const j = JSON.parse(txt);
+          detail = j.message || j.error || '';
+        } catch (e) { detail = /^</.test(txt.trim()) ? '' : txt.trim(); }
+      }
+    } catch (e) { /* body already consumed or unreadable */ }
+
+    const base =
+      status === 400 ? 'The worker rejected the request — it is probably running an older worker.js' :
+      status === 401 || status === 403 ? 'The worker refused this request' :
+      status === 404 ? 'Endpoint not found — check the worker URL' :
+      status === 405 ? 'Wrong URL — the worker is answering, but not on /v1/log' :
+      status === 413 ? 'Log too large for the sync store' :
+      status === 429 ? 'Cloudflare is rate-limiting — try again shortly' :
+      status === 500 ? 'Worker error — is the KV namespace bound as FITLOG?' :
+      status === 503 ? 'The worker is unavailable right now' :
+      'HTTP ' + status;
+
+    return detail && detail.toLowerCase() !== 'bad_body' ? base + ' (' + detail + ')' : base;
   },
 
   /* ---------- status badge in the top bar ---------- */
@@ -327,7 +379,166 @@ const Sync = {
     }
   },
 
-  /* ---------- QR ---------- */
+  /* ---------- reading a QR code with the camera ----------
+
+     Two decoders, in order of preference:
+
+       1. BarcodeDetector, built into Chrome and Android WebView. Hardware-backed,
+          costs nothing to ship.
+       2. jsQR, bundled locally, for Safari and anything else without it. 127 KB,
+          so it is fetched only when the scanner is actually opened — and it is in
+          the service worker's cache list, so it still works offline.
+
+     The camera needs a secure context. GitHub Pages is HTTPS, so that holds in
+     practice, but a page opened from a file:// path or plain http:// will not get
+     a camera and is told why rather than left staring at a black rectangle. */
+
+  get hasNativeDetector() {
+    return typeof window.BarcodeDetector === 'function';
+  },
+
+  get cameraPossible() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && window.isSecureContext !== false;
+  },
+
+  loadJsQr() {
+    if (window.jsQR) return Promise.resolve(window.jsQR);
+    if (this._jsqrPromise) return this._jsqrPromise;
+    this._jsqrPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'js/vendor/jsqr.min.js';
+      s.onload = () => window.jsQR ? resolve(window.jsQR) : reject(new Error('decoder failed to load'));
+      s.onerror = () => { this._jsqrPromise = null; reject(new Error('decoder failed to load')); };
+      document.head.appendChild(s);
+    });
+    return this._jsqrPromise;
+  },
+
+  cameraError(e) {
+    const n = (e && e.name) || '';
+    if (!window.isSecureContext) return 'The camera only works over https. Open the site by its https:// address.';
+    if (n === 'NotAllowedError' || n === 'SecurityError') {
+      return 'Camera permission was declined. Allow camera access for this site in your browser settings, then try again — or type the code in by hand.';
+    }
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'No camera found on this device.';
+    if (n === 'NotReadableError') return 'Another app is using the camera. Close it and try again.';
+    return 'Could not start the camera: ' + (e && e.message ? e.message : 'unknown error');
+  },
+
+  /** Open the camera and hand back a pairing code. Resolves null if cancelled. */
+  scanQr() {
+    return new Promise(resolve => {
+      let stream = null, raf = 0, stopped = false, settled = null;
+
+      const s = openSheet({
+        title: 'Scan the pairing code',
+        body: `
+          <p class="muted small">On your other device open <b>Settings → Sync</b> so its QR code is on screen, then hold
+            this phone up to it.</p>
+          <div class="scan-frame">
+            <video id="sc-v" playsinline muted autoplay></video>
+            <div class="scan-reticle"></div>
+          </div>
+          <div class="small" id="sc-msg" style="margin-top:10px;min-height:20px">Starting the camera…</div>
+          <p class="dim tiny" style="margin-top:6px">Nothing leaves this device — the camera image is read here and
+            thrown away.</p>`,
+        foot: `<button class="btn" data-close>Cancel</button><button class="btn" id="sc-type">${icon('edit')} Type it instead</button>`,
+        onClose: () => { stop(); resolve(settled); }
+      });
+
+      const msg = (t, cls) => {
+        const m = $('#sc-msg', s.sheet);
+        if (m) { m.textContent = t; m.className = 'small ' + (cls || 'muted'); }
+      };
+
+      const stop = () => {
+        stopped = true;
+        cancelAnimationFrame(raf);
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      };
+
+      $('#sc-type', s.sheet).onclick = () => { settled = 'type'; s.close(); };
+
+      const found = text => {
+        const code = this.parseCode(text);
+        if (!code) { msg('That is a QR code, but not a FitLog pairing code. Keep looking…', 'small warn'); return false; }
+        settled = code;
+        msg('Got it.', 'small good');
+        setTimeout(() => s.close(), 250);
+        return true;
+      };
+
+      (async () => {
+        if (!this.cameraPossible) { msg(this.cameraError({}), 'small bad'); return; }
+        const video = $('#sc-v', s.sheet);
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+        } catch (e) {
+          // Some phones refuse the rear-camera constraint; any camera is better than none.
+          try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true }); }
+          catch (e2) { msg(this.cameraError(e2), 'small bad'); return; }
+        }
+        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
+
+        video.srcObject = stream;
+        try { await video.play(); } catch (e) { /* autoplay attribute covers it */ }
+        msg('Point it at the QR code.', 'small muted');
+
+        let detector = null, decode = null;
+        if (this.hasNativeDetector) {
+          try {
+            detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+            decode = async () => {
+              const hits = await detector.detect(video);
+              return hits && hits.length ? hits[0].rawValue : null;
+            };
+          } catch (e) { detector = null; }
+        }
+
+        if (!decode) {
+          let jsqr;
+          try { jsqr = await this.loadJsQr(); }
+          catch (e) { msg('Could not load the QR reader. Type the code in instead.', 'small bad'); return; }
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          decode = () => {
+            const w = video.videoWidth, h = video.videoHeight;
+            if (!w || !h) return null;
+            // Downscale: a 480-pixel-wide frame decodes a held-up phone screen fine
+            // and costs a quarter of the pixels of the full frame.
+            const scale = Math.min(1, 480 / w);
+            canvas.width = Math.round(w * scale);
+            canvas.height = Math.round(h * scale);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const hit = jsqr(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+            return hit ? hit.data : null;
+          };
+        }
+
+        let last = 0, busy = false;
+        const tick = async ts => {
+          if (stopped) return;
+          raf = requestAnimationFrame(tick);
+          if (busy || ts - last < 120) return;                   // ~8 reads a second
+          last = ts; busy = true;
+          try {
+            const text = await decode();
+            if (text && found(text)) return;
+          } catch (e) { /* a dropped frame is not worth reporting */ }
+          busy = false;
+        };
+        raf = requestAnimationFrame(tick);
+      })();
+    });
+  },
+
+  /* ---------- showing a QR ---------- */
 
   qrSvg(text, px) {
     if (typeof qrcode !== 'function') return '';

@@ -161,7 +161,7 @@ const Settings = {
         <p class="muted small">This device is not syncing yet. Start a new synced log, or join the one your other device already has.</p>
         <div class="btn-row" style="margin-bottom:12px">
           <button class="btn primary grow" id="sy-new">${icon('cloud')} Turn on sync here</button>
-          <button class="btn grow" id="sy-join">${icon('qr')} Pair with another device</button>
+          <button class="btn grow" id="sy-join">${icon(Sync.cameraPossible ? 'camera' : 'qr')} ${Sync.cameraPossible ? 'Scan a QR code' : 'Pair with another device'}</button>
         </div>
         <p class="dim tiny">Pick <b>Turn on sync here</b> on the device that already has your history — it becomes the
           first copy. On every other device, choose <b>Pair</b>.</p>
@@ -179,11 +179,14 @@ const Settings = {
           <button class="btn xs" id="sy-now">${icon('refresh')} Sync now</button>
         </div>
         <div class="small muted">${esc(Sync.statusLine())}</div>
+        ${sy.noGzip ? `<div class="small warn" style="margin-top:7px">Your worker is an older version, so the log is
+          being sent uncompressed. Redeploy <b>worker/worker.js</b> and press <b>Sync now</b> to use roughly a sixth of
+          the data.</div>` : ''}
       </div>
 
       <div class="section-title" style="margin-top:6px">Add another device</div>
-      <p class="muted small">Open the camera on the other device and point it at this code. It opens FitLog already paired —
-        nothing to type.</p>
+      <p class="muted small">On the other device open FitLog, go to <b>Settings → Sync → ${Sync.cameraPossible ? 'Scan a QR code' : 'Pair with another device'}</b>
+        and hold it up to this code. Your phone's own camera app works too — it opens FitLog already paired.</p>
       <div class="qr-wrap" id="sy-qr">${Sync.qrSvg(Sync.pairLink(), 210) || '<div class="dim small">QR unavailable</div>'}</div>
       <div class="btn-row" style="margin-bottom:12px">
         <button class="btn grow" id="sy-copy">${icon('link')} Copy pairing link</button>
@@ -270,23 +273,42 @@ const Settings = {
   },
 
   joinSheet(after) {
+    const canScan = Sync.cameraPossible;
     const s = openSheet({
       title: 'Pair with another device',
       body: `
-        <p class="muted small">On the device that already has your log, open <b>Settings → Sync</b> and show its QR code.
-          Scan it with this device's camera and you are done — you only need what is below if the camera is not an option.</p>
+        <p class="muted small">On the device that already has your log, open <b>Settings → Sync</b> and show its QR code.</p>
+        ${canScan ? `
+          <button class="btn primary wide" id="jn-scan" style="margin-bottom:14px">${icon('camera')} Scan the QR code</button>
+          <div class="or-line"><span>or type it in</span></div>` : `
+          <p class="dim tiny">This browser will not give FitLog a camera — over plain http, or with camera access
+            switched off. Type the code in instead; it works just as well.</p>`}
         <label class="fld"><span>Pairing code or link</span>
-          <input id="jn" placeholder="A1B2 C3D4 … or the pasted link" autocomplete="off" spellcheck="false"></label>
-        <p class="dim tiny">Spaces and capitals do not matter.</p>`,
+          <input id="jn" placeholder="A1B2 C3D4 … or the pasted link" autocomplete="off" spellcheck="false"
+            inputmode="latin" autocapitalize="characters"></label>
+        <p class="dim tiny">Spaces and capitals do not matter, and pasting the whole link works too.</p>`,
       foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="jn-go">Pair</button>`
     });
-    const go = async () => {
-      const val = $('#jn', s.sheet).value;
-      if (!Sync.parseCode(val)) return toast('That code is not complete', 'warn');
+
+    const pair = async val => {
       s.close();
       await Sync.adoptCode(val);
       if (after) after();
     };
+
+    const go = async () => {
+      const val = $('#jn', s.sheet).value;
+      if (!Sync.parseCode(val)) return toast('That code is not complete', 'warn');
+      await pair(val);
+    };
+
+    if (canScan) {
+      $('#jn-scan', s.sheet).onclick = async () => {
+        const got = await Sync.scanQr();
+        if (!got || got === 'type') { $('#jn', s.sheet).focus(); return; }
+        await pair(got);
+      };
+    }
     $('#jn-go', s.sheet).onclick = go;
     $('#jn', s.sheet).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   },

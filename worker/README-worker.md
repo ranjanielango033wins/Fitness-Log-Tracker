@@ -127,10 +127,16 @@ wrangler deploy
 
 ```
 GET    /v1/log/<code>   -> { rev, updatedAt, data }
-PUT    /v1/log/<code>   <- { rev, days, enc, payload }    409 if rev is stale
+PUT    /v1/log/<code>   <- { rev, days, dels, enc, payload }    409 if rev is stale
 DELETE /v1/log/<code>   -> { ok: true }
 GET    /                -> a health page
 ```
+
+**Already deployed an earlier copy?** Replace it with this one. The app works either
+way — if the worker answers 400 to a compressed push it sends the log uncompressed
+instead and tells you in Settings — but the current version compresses, which is
+roughly six times less data, and refuses a push that would replace a full log with
+an empty one.
 
 - **The code is the credential.** 128 bits of randomness, so it is not guessable,
   but anyone holding it can read and write your log. Keep it out of group chats.
@@ -139,8 +145,11 @@ GET    /                -> a health page
   copy has moved on, the write is refused with 409 and the client merges and
   retries. Nothing is overwritten blindly.
 - **An empty push cannot wipe your devices.** The client states how many days it
-  is sending and the worker refuses a payload that claims fewer days than it
-  holds without a matching revision.
+  is sending and how many deletions it carries. A push of zero days against a
+  stored log that has days in it is refused with the live copy attached, so the
+  device merges and pushes that instead. A device that really did delete
+  everything carries tombstones and is allowed through; erasing the cloud copy
+  on purpose is DELETE.
 - **It stores one opaque blob per code.** Gzipped on the device before it is sent.
   The worker does not parse your log, and there is no endpoint that lists codes.
 - **20 MB ceiling** per code — roughly a decade of daily logging.

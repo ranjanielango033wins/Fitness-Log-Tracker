@@ -90,15 +90,32 @@ export default {
         return json({ error: 'bad_body', message: 'Expected { rev, data } or { rev, enc, payload }.' }, 400);
       }
 
-      /* A payload claiming no days would wipe a real log on the other devices.
-         The client states the count so this holds for the compressed shape too. */
       const dayCount = compressed ? body.days : Object.keys(body.data.days || {}).length;
       if (!Number.isFinite(dayCount) || dayCount < 0) {
         return json({ error: 'bad_body', message: 'Payload did not state a day count.' }, 400);
       }
+      const delCount = Number.isFinite(body.dels) ? body.dels : (compressed ? null : Object.keys((body.data._del || {}).days || {}).length);
 
       const current = await env.FITLOG.get(key, 'json');
       const currentRev = current && typeof current.rev === 'number' ? current.rev : 0;
+
+      /* An empty log must never overwrite a full one. A device that genuinely
+         deleted everything carries tombstones and says so in `dels`; a device
+         that merely failed to read the stored copy carries neither, and gets the
+         live copy back as a conflict so it merges and pushes that instead.
+         A deliberate wipe of the cloud copy is DELETE, not an empty PUT. */
+      const storedDays = current && Number.isFinite(current.days) ? current.days : null;
+      if (dayCount === 0 && storedDays > 0 && !(delCount > 0)) {
+        return json({
+          error: 'refuse_empty',
+          message: 'Refusing to replace a log of ' + storedDays + ' days with an empty one.',
+          rev: currentRev,
+          updatedAt: current.updatedAt,
+          enc: current.enc,
+          payload: current.payload,
+          data: current.data || null
+        }, 409);
+      }
 
       if (body.rev !== currentRev) {
         // Someone else moved the record on. Hand back the live copy so the
@@ -114,8 +131,8 @@ export default {
       }
 
       const record = compressed
-        ? { rev: currentRev + 1, updatedAt: new Date().toISOString(), enc: 'gzip', days: dayCount, payload: body.payload }
-        : { rev: currentRev + 1, updatedAt: new Date().toISOString(), days: dayCount, data: body.data };
+        ? { rev: currentRev + 1, updatedAt: new Date().toISOString(), enc: 'gzip', days: dayCount, dels: delCount || 0, payload: body.payload }
+        : { rev: currentRev + 1, updatedAt: new Date().toISOString(), days: dayCount, dels: delCount || 0, data: body.data };
       const serialised = JSON.stringify(record);
 
       if (serialised.length > MAX_BYTES) {
